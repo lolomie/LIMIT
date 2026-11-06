@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">LIMIT</string>
+    <string name="accessibility_label">LIMIT app blocking</string>
+    <string name="accessibility_description">LIMIT uses app window changes to detect when a selected app is open and show a blocking screen after its daily limit. It does not read screen text, type, record gestures, or access the Internet. Usage access is also required. You can disable this service at any time in Android Settings.</string>
+</resources>
