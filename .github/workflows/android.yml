@@ -16,6 +16,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest :test-target:assembleDebug --console=plain
       - uses: actions/upload-artifact@v4
@@ -27,3 +29,4 @@ jobs:
             test-target/build/outputs/apk/
             app/build/reports/
             app/build/test-results/
+
