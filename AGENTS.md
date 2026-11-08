@@ -7,5 +7,5 @@ The user requests automatic GitHub backup of completed work for this project.
 - Preserve versioned Android source, Gradle wrapper, tests, build scripts and documentation.
 - Publish verified deliverables in dist/ when an APK milestone is completed; update checksums and verification notes together. Distinguish archived test results from checks actually rerun.
 - Never commit credentials, private signing keys, SDKs, caches, local.properties, or private physical-device diagnostic reports.
-- Service reliability on Redmi/HyperOS remains unresolved in 1.0.6. The proposed foreground-service background protection is not implemented; do not claim it exists or prevents force-stop.
+- The 1.0.7 branch implements a foreground protection companion and cooldown recovery. Physical Redmi/HyperOS reliability remains unverified; never claim that foreground protection prevents force-stop.
 - Keep usage accounting, daily exception rules and existing capsule design unchanged unless the task authorizes changes.

@@ -4,6 +4,11 @@ LIMIT is a minimalist Android app for setting daily app allowances. It runs offl
 
 ## Current status
 
+**1.0.7 adds background protection status and recovery after exhausted short retries. Physical Redmi/HyperOS reliability remains unverified.** The repair passed 102 JVM tests, lint with no errors, and eight API29 Android tests including task removal. The APK uses a different debug signing certificate from 1.0.6; read the [1.0.7 installation guide](dist/LIMIT-1.0.7-INSTALL.md) before using it. Return to LIMIT after enabling accessibility to start the foreground companion. See [service reliability](docs/SERVICE_RELIABILITY.md) for startup, notification and force-stop limits. The 1.0.6 results below are historical and do not certify 1.0.7.
+
+[1.0.7 test APK](dist/LIMIT-1.0.7.apk) · [Fresh results](dist/LIMIT-1.0.7-TEST-RESULTS.md) · [Repair review](dist/LIMIT-1.0.7-REVIEW.md)
+
+
 **1.0.6 is a diagnostic build. The recurring Redmi/HyperOS accessibility-service failure remains unresolved.** The proposed foreground-service background protection has not been implemented. A successful emulator run does not certify Xiaomi background reliability.
 
 The archived verification for this exact APK reports 95 JVM tests and 8 Android tests passing; lint has no errors. Earlier failed test attempts and their environment findings remain documented in the reports. This repository import makes no application-code changes and does not claim a new device test run.

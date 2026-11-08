@@ -2,6 +2,7 @@ name: Android validation
 on:
   push:
     branches: ['codex/service-reliability']
+    paths: ['app/**', 'test-target/**', 'gradle/**', 'gradlew', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -71,4 +72,3 @@ jobs:
           git add dist/LIMIT-1.0.7*
           git commit -m 'Archive verified LIMIT 1.0.7 APK and fresh validation reports'
           git push origin HEAD:codex/service-reliability
-
