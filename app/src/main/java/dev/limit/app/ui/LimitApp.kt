@@ -92,6 +92,12 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
+import dev.limit.app.monitor.ProtectionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -488,6 +494,11 @@ private fun SettingsPage(
     serviceDiagnostics: String,
     onCopyDiagnostics: () -> Unit,
 ) {
+    val settingsContext = LocalContext.current
+    var notificationAllowed by remember { mutableStateOf(NotificationManagerCompat.from(settingsContext).areNotificationsEnabled()) }
+    val notificationRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationAllowed = NotificationManagerCompat.from(settingsContext).areNotificationsEnabled()
+    }
     LazyColumn(
         Modifier.fillMaxSize().padding(padding).testTag("settings"),
         contentPadding = PaddingValues(24.dp),
@@ -495,6 +506,17 @@ private fun SettingsPage(
     ) {
         item { PageHeading("Keep it simple.", "A little setup, then less screen time.") }
         if (storageError != null) item { Text(storageError, color = MaterialTheme.colorScheme.error) }
+        item {
+            Text("Background protection", style = MaterialTheme.typography.titleLarge)
+            Text(if (ProtectionService.running) "Status service is running. Its notification shows whether monitoring is working."
+                else "Open LIMIT after enabling accessibility to start the status service.")
+            Text(if (notificationAllowed) "Protection notifications are allowed."
+                else "Notifications are blocked. Background protection can run, but its warnings may be hidden.")
+            TextButton(onClick = {
+                if (Build.VERSION.SDK_INT >= 33 && !notificationAllowed) notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
+                else onAppSettings()
+            }) { Text("Review protection notifications") }
+        }
         item { Text("Required permissions", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
         item {
             PermissionCard("Usage access", usageAccess, "Reads which apps are in the foreground and for how long. Your usage stays on this device.", if (usageAccess) "Review access" else "Allow usage access", onUsage)
@@ -554,7 +576,7 @@ private fun SettingsPage(
                 maxLines = 6, overflow = TextOverflow.Ellipsis)
             TextButton(onClick = onCopyDiagnostics, modifier = Modifier.testTag("copy_service_diagnostics")) { Text("Copy service diagnostics") }
         }
-        item { Text("LIMIT 1.0.6", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)) }
+        item { Text("LIMIT 1.0.7", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)) }
     }
 }
 

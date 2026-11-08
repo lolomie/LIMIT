@@ -10,6 +10,8 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
+import android.os.SystemClock
+import dev.limit.app.core.RecoveryPolicy
 import android.os.PowerManager
 import android.view.Gravity
 import android.view.View
@@ -58,6 +60,16 @@ class LimitAccessibilityService : AccessibilityService() {
         val connected: StateFlow<Boolean> = mutableConnected.asStateFlow()
         private val mutableFailure = MutableStateFlow<String?>(null)
         val failure: StateFlow<String?> = mutableFailure.asStateFlow()
+        private var instance: LimitAccessibilityService? = null
+        fun probe() {
+            val service = instance ?: return
+            if (!service.bound || service.destroyed) return
+            val started = service.refreshStartedAt
+            if (started != null && SystemClock.elapsedRealtime() - started > 90_000) {
+                mutableConnected.value = false
+                mutableFailure.value = "Monitoring is not responding. Re-enable the LIMIT accessibility service."
+            } else if (service.retryExhausted && service.usableScreen()) service.requestRefresh(0)
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate +
@@ -71,6 +83,7 @@ class LimitAccessibilityService : AccessibilityService() {
     private var periodic: Job? = null
     private var settling: Job? = null
     private var midnight: Job? = null
+    private var refreshStartedAt: Long? = null
     private var overlay: View? = null
     private var blockedPackage: String? = null
     private var lastWindowPackage: String? = null
@@ -86,7 +99,7 @@ class LimitAccessibilityService : AccessibilityService() {
     private var bound = false
     private var destroyed = false
     private var observing = false
-    private var retries = 0
+    private val recovery = RecoveryPolicy()
     private var retryExhausted = false
     private var retryJob: Job? = null
     private var sessionGeneration = 0L
@@ -112,7 +125,8 @@ class LimitAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         bound = true
-        retries = 0
+        instance = this
+        recovery.reset()
         retryExhausted = false
         scope.launch { gate.withLock { initializeService() } }
     }
@@ -149,7 +163,6 @@ class LimitAccessibilityService : AccessibilityService() {
         refreshCapsuleCatalog()
         if (!bound || destroyed) return
         initialized = true
-        mutableConnected.value = true
         mutableFailure.value = null
         refresh()
       } catch (cancelled: CancellationException) { throw cancelled
@@ -170,8 +183,9 @@ class LimitAccessibilityService : AccessibilityService() {
             Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), error)
             return
         }
-        if (!bound || retries >= 3) { retryExhausted = true; return }
-        val wait = longArrayOf(1_000, 5_000, 15_000)[retries++]
+        if (!bound) return
+        val wait = recovery.failureDelay(SystemClock.elapsedRealtime())
+        if (wait == null) { retryExhausted = true; return }
         val retry = scope.launch(start = CoroutineStart.LAZY) {
             delay(wait)
             retryJob = null
@@ -184,7 +198,7 @@ class LimitAccessibilityService : AccessibilityService() {
     }
 
     private fun resetRecovery() {
-        retries = 0
+        recovery.reset()
         retryExhausted = false
         retryJob?.cancel()
         retryJob = null
@@ -249,7 +263,11 @@ class LimitAccessibilityService : AccessibilityService() {
     }
 
     private fun requestRefresh(waitMs: Long) {
-        if (!bound || destroyed || retryExhausted || retryJob?.isActive == true) return
+        if (!bound || destroyed || retryJob?.isActive == true) return
+        if (retryExhausted) {
+            if (!recovery.allowEvent(SystemClock.elapsedRealtime())) return
+            retryExhausted = false
+        }
         pending?.cancel()
         val next = scope.launch(start = CoroutineStart.LAZY) {
             delay(waitMs)
@@ -275,14 +293,21 @@ class LimitAccessibilityService : AccessibilityService() {
         periodic?.cancel()
         midnight?.cancel()
       try {
-        if (!repository.ready.value || !tracker.hasUsageAccess() || !usableScreen()) {
+        if (!repository.ready.value || !tracker.hasUsageAccess()) {
+            mutableConnected.value = false
+            hideCapsule()
+            clearOverlay()
+            return
+        }
+        if (!usableScreen()) {
             hideCapsule()
             clearOverlay()
             return
         }
             mutableFailure.value = null
             repository.checkpointBlock()
-            val snapshot = tracker.snapshot()
+            refreshStartedAt = SystemClock.elapsedRealtime()
+            val snapshot = try { tracker.snapshot() } finally { refreshStartedAt = null }
             if (!bound || destroyed) { hideCapsule(); clearOverlay(); return }
             if (!snapshot.available) {
                 hideCapsule()
@@ -353,7 +378,7 @@ class LimitAccessibilityService : AccessibilityService() {
                 .toInstant().toEpochMilli()
             midnight = scope.launch { delay((nextDay - now).coerceAtLeast(1)); requestRefresh(0) }
             mutableConnected.value = bound && !destroyed
-            retries = 0
+            recovery.reset()
             retryExhausted = false
             retryJob?.cancel()
             retryJob = null
@@ -543,6 +568,7 @@ class LimitAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         destroyed = true
+        if (instance === this) instance = null
         bound = false
         hideCapsule()
         mutableConnected.value = false
@@ -555,6 +581,7 @@ class LimitAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        if (instance === this) instance = null
         bound = false
         mutableConnected.value = false
         pending?.cancel()

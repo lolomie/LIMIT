@@ -145,6 +145,20 @@ class LimitBlockingTest {
                 assertTrue("Launcher must not retain another app's capsule", awaitCapsule(false, 5_000))
             }
 
+            // Removing LIMIT's own task must not stop its system-bound monitor or companion.
+            context.startActivity(Intent(context, dev.limit.app.MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            withTimeout(10_000) {
+                while (!dev.limit.app.monitor.ProtectionService.running) delay(100)
+            }
+            instrumentation.runOnMainSync {
+                context.getSystemService(android.app.ActivityManager::class.java).appTasks
+                    .forEach { it.finishAndRemoveTask() }
+            }
+            delay(2_000)
+            assertTrue("Companion must survive task removal", dev.limit.app.monitor.ProtectionService.running)
+            assertTrue("Accessibility must survive task removal", LimitAccessibilityService.connected.value)
+
             application.repository.setRule(fixture, 0)
             val date = LocalDate.now().toString()
             val before = LimitEngine.budget(application.repository.state.value, date, fixture)
