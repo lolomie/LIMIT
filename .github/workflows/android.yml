@@ -59,6 +59,14 @@ jobs:
         with:
           name: LIMIT-1.0.8-validation
           path: validation
+      - name: Refuse a stale validation artifact
+        run: |
+          # Only publish if the tested source matches the current branch code.
+          # A later docs/dist-only commit is fine; a later app/build edit is not.
+          git diff --quiet "$GITHUB_SHA" HEAD -- app/ test-target/ gradle/ gradlew build.gradle.kts settings.gradle.kts gradle.properties || {
+            echo 'Source files changed after this run. Refusing to publish an older APK.'
+            exit 1
+          }
       - name: Preserve verified APK and reports
         run: |
           cp validation/app/build/outputs/apk/debug/app-debug.apk dist/LIMIT-1.0.8.apk
