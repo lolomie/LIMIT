@@ -3,7 +3,7 @@ package dev.limit.app.core
 import kotlin.math.max
 import kotlin.math.min
 
-data class AppRule(val limitMinutes: Int, val enabled: Boolean = true) {
+data class AppRule(val limitMinutes: Int, val enabled: Boolean = true, val hours: AllowedHours = AllowedHours()) {
     init { require(limitMinutes in 0..1440) { "Daily limit must be between 0 and 1440 minutes" } }
     val limitMs: Long get() = limitMinutes * 60_000L
 }

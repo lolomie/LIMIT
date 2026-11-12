@@ -5,6 +5,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import dev.limit.app.core.AllowedHours
+import dev.limit.app.core.AllowedHoursMode
+import dev.limit.app.core.AllowedHoursPolicy
 import dev.limit.app.core.AppRule
 import dev.limit.app.core.AppUsage
 import dev.limit.app.core.DayLedger
@@ -70,9 +73,12 @@ class StateRepository(context: Context) {
         LimitEngine.reconcile(it, date, totals)
     }
 
-    suspend fun setRule(packageName: String, minutes: Int?) = mutate {
+    suspend fun setRule(packageName: String, minutes: Int?, hours: AllowedHours? = null) = mutate { state ->
         require(minutes == null || packageName !in protectedPackages) { "Essential system apps cannot be restricted." }
-        LimitEngine.setRule(it, LocalDate.now().toString(), packageName, minutes?.let { value -> AppRule(value) })
+        val newRule = minutes?.let { value ->
+            AppRule(value, hours = hours ?: state.rules[packageName]?.hours ?: AllowedHours())
+        }
+        LimitEngine.setRule(state, LocalDate.now().toString(), packageName, newRule)
     }
 
     suspend fun setTheme(theme: String) {
@@ -87,6 +93,9 @@ class StateRepository(context: Context) {
     suspend fun grant(packageName: String, expectedDate: String = LocalDate.now().toString()) = mutate {
         check(expectedDate == LocalDate.now().toString()) { "The day changed. Refresh before granting." }
         check(it.limitReachedAction == LimitReachedAction.OFFER_EXTENSION) { "Extra time is disabled in Settings." }
+        check(it.rules[packageName]?.let { rule -> AllowedHoursPolicy.isAllowed(rule.hours) } == true) {
+            "The app is outside its allowed hours."
+        }
         LimitEngine.grant(it, expectedDate, packageName)
     }
 
@@ -179,7 +188,9 @@ class StateRepository(context: Context) {
         put("limitReachedAction", state.limitReachedAction.name)
         put("rules", JSONObject().apply {
             state.rules.forEach { (pkg, rule) -> put(pkg, JSONObject()
-                .put("minutes", rule.limitMinutes).put("enabled", rule.enabled)) }
+                .put("minutes", rule.limitMinutes).put("enabled", rule.enabled)
+                .put("hours", JSONObject().put("mode", rule.hours.mode.name)
+                    .put("from", rule.hours.fromMinute).put("until", rule.hours.untilMinute))) }
         })
         put("days", JSONObject().apply {
             state.days.forEach { (date, day) -> put(date, JSONObject()
@@ -196,7 +207,15 @@ class StateRepository(context: Context) {
         require(json.getInt("version") == 1) { "Unknown settings version" }
         val rulesJson = json.getJSONObject("rules")
         val rules = rulesJson.keys().asSequence().associateWith { pkg ->
-            rulesJson.getJSONObject(pkg).let { AppRule(it.getInt("minutes"), it.getBoolean("enabled")) }
+            rulesJson.getJSONObject(pkg).let { saved ->
+                val hoursJson = saved.optJSONObject("hours")
+                val hours = if (hoursJson == null) AllowedHours() else AllowedHours(
+                    mode = AllowedHoursMode.valueOf(hoursJson.getString("mode")),
+                    fromMinute = hoursJson.getInt("from"),
+                    untilMinute = hoursJson.getInt("until"),
+                )
+                AppRule(saved.getInt("minutes"), saved.getBoolean("enabled"), hours)
+            }
         }
         val daysJson = json.getJSONObject("days")
         val days = daysJson.keys().asSequence().associateWith { date ->

@@ -12,7 +12,7 @@ Version 1.0.1 adds an independent passive camera-capsule controller. Its pure mo
 
 ## State and transactions
 
-Rules contain a daily minute limit and enabled status. Each local date has a ledger with a global grant count and per-app observed usage plus remaining exception credit. OS snapshots replace/reconcile observations without adding replayed totals twice; observed daily totals do not decrease after they have been accepted.
+Rules contain a daily minute limit, enabled status, and optional wall-clock allowed hours (default ANYTIME for schema-v1 records with no hours field). All timed modes require both a permitted local wall time and a positive remaining daily budget; time denial takes precedence over an exhausted budget. An overnight window does not create a new spending day. A saved edit changes the rule but not any dated ledger or global grants. Each local date has a ledger with a global grant count and per-app observed usage plus remaining exception credit. OS snapshots replace/reconcile observations without adding replayed totals twice; observed daily totals do not decrease after they have been accepted.
 
 Redemption requires a restricted app with no remaining base or exception allowance, available verified usage, and fewer than two grants for that date. One persisted transaction consumes a global slot and creates 300,000 milliseconds of app-specific credit before the app is reopened. Usage already over a newly lowered limit does not consume a newly created grant retroactively. Settings edits do not refund grants.
 

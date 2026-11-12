@@ -24,6 +24,8 @@ import android.widget.TextView
 import android.widget.ScrollView
 import android.widget.FrameLayout
 import dev.limit.app.LimitApplication
+import dev.limit.app.core.AllowedHoursPolicy
+import dev.limit.app.core.BlockReason
 import dev.limit.app.core.LimitEngine
 import dev.limit.app.core.LimitReachedAction
 import dev.limit.app.core.BlockSessionPolicy
@@ -31,6 +33,7 @@ import dev.limit.app.core.CapsuleObservation
 import dev.limit.app.core.UsageCapsuleModel
 import dev.limit.app.data.AppCatalog
 import dev.limit.app.data.ServiceDiagnostics
+import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
@@ -83,6 +86,7 @@ class LimitAccessibilityService : AccessibilityService() {
     private var periodic: Job? = null
     private var settling: Job? = null
     private var midnight: Job? = null
+    private var timeBoundary: Job? = null
     private var refreshStartedAt: Long? = null
     private var overlay: View? = null
     private var blockedPackage: String? = null
@@ -90,6 +94,9 @@ class LimitAccessibilityService : AccessibilityService() {
     private var exceptionButton: Button? = null
     private var exceptionLabel: TextView? = null
     private var errorLabel: TextView? = null
+    private var blockTitle: TextView? = null
+    private var blockDescription: TextView? = null
+    private var blockedAppName: String = ""
     private var registered = false
     private var homes: Set<String> = setOf("com.miui.home", "com.android.launcher3", "com.google.android.apps.nexuslauncher")
     private var protectedPackages: Set<String> = setOf("android", "com.android.settings", "com.android.systemui",
@@ -115,9 +122,10 @@ class LimitAccessibilityService : AccessibilityService() {
                 hideCapsule()
                 deadline?.cancel()
                 periodic?.cancel()
+                timeBoundary?.cancel()
                 scope.launch { gate.withLock { clearOverlay() } }
             }
-            if (intent?.action == Intent.ACTION_TIME_CHANGED || intent?.action == Intent.ACTION_TIMEZONE_CHANGED) hideCapsule()
+            if (intent?.action == Intent.ACTION_DATE_CHANGED || intent?.action == Intent.ACTION_TIME_CHANGED || intent?.action == Intent.ACTION_TIMEZONE_CHANGED) hideCapsule()
             if (intent?.action != Intent.ACTION_SCREEN_OFF) resetRecovery() else requestRefresh(0)
         }
     }
@@ -144,6 +152,7 @@ class LimitAccessibilityService : AccessibilityService() {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_DATE_CHANGED)
             addAction(Intent.ACTION_TIME_CHANGED)
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
         }
@@ -178,6 +187,7 @@ class LimitAccessibilityService : AccessibilityService() {
         deadline?.cancel()
         periodic?.cancel()
         midnight?.cancel()
+        timeBoundary?.cancel()
         retryJob?.cancel()
         if (error is Error) {
             Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), error)
@@ -292,6 +302,7 @@ class LimitAccessibilityService : AccessibilityService() {
         deadline?.cancel()
         periodic?.cancel()
         midnight?.cancel()
+        timeBoundary?.cancel()
       try {
         if (!repository.ready.value || !tracker.hasUsageAccess()) {
             mutableConnected.value = false
@@ -331,26 +342,31 @@ class LimitAccessibilityService : AccessibilityService() {
                 val other = lastWindowPackage
                 val confirmedNavigation = BlockSessionPolicy.shouldDismiss(sessionGeneration, sessionGeneration,
                     blocked, other, homes, protectedPackages, keyboardPackages, criticalSurfaces, snapshot.activePackages)
-                if (budget.remainingMs > 0 || state.rules[blocked]?.enabled != true || confirmedNavigation) {
+                val reason = AllowedHoursPolicy.reason(state.rules[blocked], budget)
+                if (reason == BlockReason.NONE || confirmedNavigation) {
                     clearOverlay()
-                } else if (state.limitReachedAction == LimitReachedAction.RETURN_HOME) {
+                } else if (reason == BlockReason.DAILY_BUDGET &&
+                    state.limitReachedAction == LimitReachedAction.RETURN_HOME) {
                     clearOverlay()
                     returnHome(blocked)
-                } else updateOverlay(budget.grantsRemaining)
+                } else updateOverlay(reason, budget.grantsRemaining, blocked)
             }
             if (blockedPackage == null) {
                 val candidates = snapshot.activePackages.filter {
                     it !in protectedPackages && state.rules[it]?.enabled == true &&
                         lastWindowPackage !in protectedPackages
                 }.sortedBy { if (it == lastWindowPackage) 0 else 1 }
-                val exhausted = candidates.firstOrNull {
-                    LimitEngine.budget(state, snapshot.date, it).remainingMs <= 0
+                val blockedCandidate = candidates.firstNotNullOfOrNull { pkg ->
+                    val budget = LimitEngine.budget(state, snapshot.date, pkg)
+                    val reason = AllowedHoursPolicy.reason(state.rules[pkg], budget)
+                    if (reason == BlockReason.NONE) null else pkg to reason
                 }
-                if (exhausted != null) {
-                    if (state.limitReachedAction == LimitReachedAction.RETURN_HOME) returnHome(exhausted)
-                    else showOverlay(exhausted, snapshot.date)
-                }
-                else if (candidates.isNotEmpty()) {
+                if (blockedCandidate != null) {
+                    val (pkg, reason) = blockedCandidate
+                    if (reason == BlockReason.DAILY_BUDGET &&
+                        state.limitReachedAction == LimitReachedAction.RETURN_HOME) returnHome(pkg)
+                    else showOverlay(pkg, snapshot.date, reason)
+                } else if (candidates.isNotEmpty()) {
                     val remaining = candidates.minOf {
                         LimitEngine.budget(state, snapshot.date, it).remainingMs
                     }
@@ -373,7 +389,18 @@ class LimitAccessibilityService : AccessibilityService() {
             if (updateCapsule(snapshot, snapshot.observedElapsedMs) && periodic?.isActive != true) {
                 periodic = scope.launch { delay(15_000); requestRefresh(0) }
             }
-            val now = System.currentTimeMillis()
+            val clock = Clock.systemDefaultZone()
+            val now = clock.millis()
+            val nextBoundary = state.rules.values.asSequence()
+                .filter { it.enabled }
+                .mapNotNull { AllowedHoursPolicy.nextTransition(it.hours, clock) }
+                .minOrNull()
+            if (nextBoundary != null) {
+                timeBoundary = scope.launch {
+                    delay((nextBoundary.toEpochMilli() - now).coerceAtLeast(1))
+                    requestRefresh(0)
+                }
+            }
             val nextDay = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault())
                 .toInstant().toEpochMilli()
             midnight = scope.launch { delay((nextDay - now).coerceAtLeast(1)); requestRefresh(0) }
@@ -399,8 +426,8 @@ class LimitAccessibilityService : AccessibilityService() {
         }
     }
 
-    private suspend fun showOverlay(pkg: String, date: String) {
-        protectedPackages = AppCatalog(this).protectedPackages()
+    private suspend fun showOverlay(pkg: String, date: String, reason: BlockReason) {
+        protectedPackages = protectedPackages + AppCatalog(this).protectedPackages()
         if (!usableScreen() || pkg in protectedPackages) return
         hideCapsule()
         repository.beginBlock(pkg)
@@ -435,8 +462,9 @@ class LimitAccessibilityService : AccessibilityService() {
         label("LIMIT", 14f, true)
         val appName = runCatching { packageManager.getApplicationLabel(
             packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
-        label("Time to step away.", 32f, true)
-        label("You've reached today's limit for $appName.", 18f)
+        blockedAppName = appName
+        blockTitle = label("Time to step away.", 32f, true)
+        blockDescription = label("You've reached today's limit for $appName.", 18f)
         exceptionLabel = label("", 15f)
         exceptionButton = Button(this).apply {
             text = "Use 5 minutes"
@@ -473,17 +501,34 @@ class LimitAccessibilityService : AccessibilityService() {
         try {
             getSystemService(WindowManager::class.java).addView(scroll, params)
             overlay = scroll
-            updateOverlay(LimitEngine.budget(repository.state.value, date, pkg).grantsRemaining)
+            updateOverlay(reason, LimitEngine.budget(repository.state.value, date, pkg).grantsRemaining, pkg)
         } catch (error: Exception) {
             clearOverlay()
             throw error
         }
     }
 
-    private fun updateOverlay(grants: Int) {
-        exceptionLabel?.text = if (grants == 0) "No exceptions left today. Resets at midnight."
-            else "$grants of 2 exceptions left today. Each gives 5 minutes."
-        exceptionButton?.isEnabled = grants > 0
+    private fun updateOverlay(reason: BlockReason, grants: Int, pkg: String) {
+        val outside = reason == BlockReason.OUTSIDE_HOURS
+        blockTitle?.text = if (outside) "Erlaubte Nutzungszeit" else "Time to step away."
+        blockDescription?.text = if (outside) {
+            val clock = Clock.systemDefaultZone()
+            val opening = repository.state.value.rules[pkg]?.hours
+                ?.let { AllowedHoursPolicy.nextOpening(it, clock) }
+            if (opening == null) "$blockedAppName ist derzeit nicht verfügbar."
+            else {
+                val dateTime = opening.atZone(clock.zone)
+                val prefix = if (dateTime.toLocalDate() == LocalDate.now(clock)) "" else "morgen "
+                "$blockedAppName ist ${prefix}ab ${dateTime.toLocalTime()} Uhr wieder verfügbar."
+            }
+        } else "You've reached today's limit for $blockedAppName."
+        exceptionLabel?.visibility = if (outside) View.GONE else View.VISIBLE
+        exceptionButton?.visibility = if (outside) View.GONE else View.VISIBLE
+        if (!outside) {
+            exceptionLabel?.text = if (grants == 0) "No exceptions left today. Resets at midnight."
+                else "$grants of 2 exceptions left today. Each gives 5 minutes."
+            exceptionButton?.isEnabled = grants > 0
+        }
     }
 
     private suspend fun redeem(pkg: String, session: Long) {
@@ -494,17 +539,29 @@ class LimitAccessibilityService : AccessibilityService() {
             check(snapshot.available)
             repository.reconcile(snapshot.date, snapshot.totals)
             check(bound && !destroyed && sessionGeneration == session && pkg == blockedPackage)
+            check(repository.state.value.rules[pkg]?.let { AllowedHoursPolicy.isAllowed(it.hours) } == true) {
+                "The allowed time window has closed."
+            }
             val launchIntent = checkNotNull(packageManager.getLaunchIntentForPackage(pkg)) {
                 "This app is no longer available."
             }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             repository.grant(pkg, snapshot.date) // Commit before exposing the app; reject midnight races.
+            if (!AllowedHoursPolicy.isAllowed(repository.state.value.rules.getValue(pkg).hours)) {
+                updateOverlay(BlockReason.OUTSIDE_HOURS,
+                    LimitEngine.budget(repository.state.value, snapshot.date, pkg).grantsRemaining, pkg)
+                requestRefresh(0)
+                return
+            }
             clearOverlay()
             startActivity(launchIntent)
             requestRefresh(350)
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (_: Exception) {
             errorLabel?.text = "Could not use an exception. Check permissions and try again."
-            updateOverlay(LimitEngine.budget(repository.state.value, LocalDate.now().toString(), pkg).grantsRemaining)
+            val today = LocalDate.now().toString()
+            val budget = LimitEngine.budget(repository.state.value, today, pkg)
+            val reason = AllowedHoursPolicy.reason(repository.state.value.rules[pkg], budget)
+            updateOverlay(reason, budget.grantsRemaining, pkg)
         }
     }
 
@@ -516,6 +573,9 @@ class LimitAccessibilityService : AccessibilityService() {
         exceptionButton = null
         exceptionLabel = null
         errorLabel = null
+        blockTitle = null
+        blockDescription = null
+        blockedAppName = ""
         try { repository.endBlock() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
@@ -571,6 +631,7 @@ class LimitAccessibilityService : AccessibilityService() {
         if (instance === this) instance = null
         bound = false
         hideCapsule()
+        timeBoundary?.cancel()
         mutableConnected.value = false
         if (registered) runCatching { unregisterReceiver(receiver) }
         overlay?.let { view -> runCatching { getSystemService(WindowManager::class.java).removeView(view) } }
@@ -589,6 +650,7 @@ class LimitAccessibilityService : AccessibilityService() {
         periodic?.cancel()
         deadline?.cancel()
         midnight?.cancel()
+        timeBoundary?.cancel()
         hideCapsule()
         overlay?.let { view -> runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(view) } }
         overlay = null

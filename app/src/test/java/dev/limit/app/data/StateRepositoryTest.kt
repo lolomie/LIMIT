@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.test.core.app.ApplicationProvider
+import dev.limit.app.core.AllowedHours
+import dev.limit.app.core.AllowedHoursMode
 import dev.limit.app.core.BudgetPhase
 import dev.limit.app.core.LimitEngine
 import java.io.File
@@ -77,6 +79,48 @@ class StateRepositoryTest {
         assertEquals(180_000L, budget.bonusRemainingMs)
         assertEquals(1, budget.grantsRemaining)
         assertEquals(BudgetPhase.EXCEPTION_ACTIVE, budget.phase)
+    }
+
+    @Test fun legacySchemaOneWithoutHoursOpensWithAnytimeAndRetainsLedger() = runBlocking {
+        val writerJob = SupervisorJob()
+        val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(writerJob + Dispatchers.IO)) {
+            storageContext.preferencesDataStoreFile("limit")
+        }
+        val legacy = """{"version":1,"theme":"DARK","rules":{"example.alpha":{"minutes":30,"enabled":true}},"days":{"$today":{"grants":1,"apps":{"example.alpha":{"used":123456,"bonus":50000}}}}}"""
+        store.edit { it[stringPreferencesKey("state_v1")] = legacy }
+        writerJob.cancelAndJoin()
+
+        val repository = open()
+        assertEquals(AllowedHours(), repository.state.value.rules[alpha]?.hours)
+        assertEquals(1, repository.state.value.days[today]?.grantsUsed)
+        assertEquals(123456L, repository.state.value.days[today]?.apps?.get(alpha)?.usedMs)
+        assertEquals(50000L, repository.state.value.days[today]?.apps?.get(alpha)?.bonusRemainingMs)
+        assertEquals("DARK", repository.state.value.theme)
+        repository.setRule(alpha, 30, AllowedHours(AllowedHoursMode.FROM, 18 * 60))
+        assertEquals(1, repository.state.value.days[today]?.grantsUsed)
+        repository.close()
+        val restored = open()
+        assertEquals(AllowedHours(AllowedHoursMode.FROM, 18 * 60), restored.state.value.rules[alpha]?.hours)
+        assertEquals(123456L, restored.state.value.days[today]?.apps?.get(alpha)?.usedMs)
+    }
+
+    @Test fun allowedHoursMigrateWithoutChangingLegacyUsageOrGrants() = runBlocking {
+        val first = open()
+        first.setRule(alpha, 0)
+        first.grant(alpha)
+        first.reconcile(today, mapOf(alpha to 90_000L))
+        val priorUsage = first.state.value.days
+        first.close()
+
+        val reopened = open()
+        assertEquals(AllowedHours(), reopened.state.value.rules[alpha]?.hours)
+        reopened.setRule(alpha, 0, AllowedHours(AllowedHoursMode.BETWEEN, 18 * 60, 21 * 60))
+        assertEquals(priorUsage, reopened.state.value.days)
+        reopened.close()
+        val final = open()
+        assertEquals(AllowedHours(AllowedHoursMode.BETWEEN, 18 * 60, 21 * 60),
+            final.state.value.rules[alpha]?.hours)
+        assertEquals(priorUsage, final.state.value.days)
     }
 
     @Test fun concurrentDuplicateGrantRequestsCommitExactlyOneGrant() = runBlocking {

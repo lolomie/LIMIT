@@ -4,6 +4,9 @@ LIMIT is a minimalist Android app for setting daily app allowances. It runs offl
 
 ## Current status
 
+**1.0.8 feature branch (CI-verified, Redmi unverified):** Adds optional per-app allowed hours, including local overnight windows. Use **Anytime**, **From a time** (until midnight), or **From–until** alongside the existing daily budget. Neither elapsed usage nor exception slots reset on edits. [Verified 1.0.8 APK](dist/LIMIT-1.0.8.apk) · [Verification report](dist/LIMIT-1.0.8-REVIEW.md) · [SHA-256](dist/LIMIT-1.0.8-SHA256SUMS) · [feature documentation](docs/ALLOWED_HOURS.md). **The signing certificate differs from 1.0.7; do not uninstall or clear data to install this APK.** The recurring Redmi Accessibility interruption is separate and unchanged.
+
+
 **1.0.7 adds background protection status and recovery after exhausted short retries. Physical Redmi/HyperOS reliability remains unverified.** The repair passed 102 JVM tests, lint with no errors, and eight API29 Android tests including task removal. The APK uses a different debug signing certificate from 1.0.6; read the [1.0.7 installation guide](dist/LIMIT-1.0.7-INSTALL.md) before using it. Return to LIMIT after enabling accessibility to start the foreground companion. See [service reliability](docs/SERVICE_RELIABILITY.md) for startup, notification and force-stop limits. The 1.0.6 results below are historical and do not certify 1.0.7.
 
 [1.0.7 test APK](dist/LIMIT-1.0.7.apk) · [Fresh results](dist/LIMIT-1.0.7-TEST-RESULTS.md) · [Repair review](dist/LIMIT-1.0.7-REVIEW.md)
