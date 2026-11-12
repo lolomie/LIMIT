@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.test.core.app.ApplicationProvider
+import dev.limit.app.core.AllowedHours
+import dev.limit.app.core.AllowedHoursMode
 import dev.limit.app.core.BudgetPhase
 import dev.limit.app.core.LimitEngine
 import java.io.File
@@ -77,6 +79,25 @@ class StateRepositoryTest {
         assertEquals(180_000L, budget.bonusRemainingMs)
         assertEquals(1, budget.grantsRemaining)
         assertEquals(BudgetPhase.EXCEPTION_ACTIVE, budget.phase)
+    }
+
+    @Test fun allowedHoursMigrateWithoutChangingLegacyUsageOrGrants() = runBlocking {
+        val first = open()
+        first.setRule(alpha, 0)
+        first.grant(alpha)
+        first.reconcile(today, mapOf(alpha to 90_000L))
+        val priorUsage = first.state.value.days
+        first.close()
+
+        val reopened = open()
+        assertEquals(AllowedHours(), reopened.state.value.rules[alpha]?.hours)
+        reopened.setRule(alpha, 0, AllowedHours(AllowedHoursMode.BETWEEN, 18 * 60, 21 * 60))
+        assertEquals(priorUsage, reopened.state.value.days)
+        reopened.close()
+        val final = open()
+        assertEquals(AllowedHours(AllowedHoursMode.BETWEEN, 18 * 60, 21 * 60),
+            final.state.value.rules[alpha]?.hours)
+        assertEquals(priorUsage, final.state.value.days)
     }
 
     @Test fun concurrentDuplicateGrantRequestsCommitExactlyOneGrant() = runBlocking {
