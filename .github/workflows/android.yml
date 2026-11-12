@@ -1,7 +1,7 @@
 name: Android validation
 on:
   push:
-    branches: ['codex/allowed-app-hours']
+    branches: ['codex/allowed-app-hours', 'codex/installable-preview']
     paths: ['app/**', 'test-target/**', 'gradle/**', 'gradlew', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties']
   pull_request:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-      - run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest :test-target:assembleDebug --console=plain
+      - run: ./gradlew testDebugUnitTest lintDebug lintPreview assembleDebug assemblePreview assembleDebugAndroidTest :test-target:assembleDebug --console=plain
       - name: Enable emulator acceleration
         run: sudo chmod a+rw /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
@@ -47,7 +47,7 @@ jobs:
 
   publish-verified-snapshot:
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref_name == 'codex/allowed-app-hours'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,3 +80,81 @@ jobs:
           git add dist/LIMIT-1.0.8*
           git commit -m 'Archive verified LIMIT 1.0.8 APK and fresh validation reports'
           git push origin HEAD:codex/allowed-app-hours
+
+  preview-smoke-36:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-1.0.8-validation
+          path: validation
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            # Both packages must coexist: the preview does not replace installed LIMIT.
+            adb install -r validation/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r validation/app/build/outputs/apk/preview/app-preview.apk
+            adb shell pm path dev.limit.app | grep 'package:'
+            adb shell pm path dev.limit.app.preview | grep 'package:'
+            adb shell am start -W -n dev.limit.app.preview/dev.limit.app.MainActivity
+            adb shell pidof dev.limit.app.preview
+
+  publish-verified-preview:
+    needs: [build, preview-smoke-36]
+    if: github.event_name == 'push' && github.ref_name == 'codex/installable-preview'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/installable-preview
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-1.0.8-validation
+          path: validation
+      - name: Refuse a stale preview source
+        run: |
+          git diff --quiet "$GITHUB_SHA" HEAD -- app/ test-target/ gradle/ gradlew build.gradle.kts settings.gradle.kts gradle.properties .github/workflows/android.yml || {
+            echo 'Build files changed after testing. Refusing to publish a stale APK.'
+            exit 1
+          }
+      - name: Publish independently installable preview
+        run: |
+          cp validation/app/build/outputs/apk/preview/app-preview.apk dist/LIMIT-1.0.8-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/LIMIT-1.0.8-preview.apk > dist/LIMIT-1.0.8-preview-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LIMIT-1.0.8-preview.apk
+          sha256sum dist/LIMIT-1.0.8-preview.apk > dist/LIMIT-1.0.8-preview-SHA256SUMS
+          printf '%s\n' '# LIMIT 1.0.8 preview verification' '' \
+            'Application ID: dev.limit.app.preview (separate from dev.limit.app).' \
+            'This signed DEBUG test APK can install beside existing LIMIT without a signing-certificate conflict.' \
+            'This does NOT update or migrate the existing installation.' \
+            'JVM tests, Android lint, API29 UI tests, and the API36 coexistence/install/launch smoke test succeeded.' \
+            'Google Play Protect and Xiaomi/HyperOS can still block sideloaded Accessibility apps. No bypass is implemented or advised.' \
+            'The signing key is CI-generated and NOT stable for later updates. Physical Redmi install remains unverified.' \
+            "Tested source commit: $GITHUB_SHA" \
+            "CI run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > dist/LIMIT-1.0.8-preview-TEST-RESULTS.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/LIMIT-1.0.8-preview*
+          git commit -m 'Archive validated independent LIMIT preview APK'
+          git push origin HEAD:codex/installable-preview

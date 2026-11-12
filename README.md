@@ -1,5 +1,7 @@
 # LIMIT
 
+**Independent installation test (LIMIT 1.0.8 Preview):** A separate `dev.limit.app.preview` build avoids the old debug-signature conflict without touching the installed `dev.limit.app` data. It is **not** a compatible upgrade, and cannot bypass Google Play Protect. [Preview installation and limitations](dist/LIMIT-1.0.8-preview-INSTALL.md). The preview APK is linked from that guide once its CI checks pass.
+
 LIMIT is a minimalist Android app for setting daily app allowances. It runs offline, has no advertisements or account, and stores its settings on the device.
 
 ## Current status
