@@ -83,6 +83,17 @@ class AllowedHoursPolicyTest {
         assertEquals(null, AllowedHoursPolicy.nextTransition(AllowedHours(), at("2026-11-12T03:00:00")))
     }
 
+    @Test fun changedTimezoneAndClockAreEvaluatedFromInjectedInstant() {
+        val hours = AllowedHours(AllowedHoursMode.BETWEEN, 18 * 60, 21 * 60)
+        val sameMoment = Instant.parse("2026-11-12T17:30:00Z")
+        assertFalse(AllowedHoursPolicy.isAllowed(hours, Clock.fixed(sameMoment, ZoneId.of("UTC"))))
+        assertTrue(AllowedHoursPolicy.isAllowed(hours, Clock.fixed(sameMoment, berlin)))
+        assertEquals(Instant.parse("2026-11-12T20:00:00Z"),
+            AllowedHoursPolicy.nextTransition(hours, Clock.fixed(sameMoment, berlin)))
+        val advanced = Clock.fixed(Instant.parse("2026-11-12T20:00:00Z"), berlin)
+        assertFalse(AllowedHoursPolicy.isAllowed(hours, advanced))
+    }
+
     @Test fun springForwardAndAutumnOverlapUseActualInstants() {
         val spring = AllowedHours(AllowedHoursMode.BETWEEN, 150, 240) // 02:30 - 04:00
         val beforeSpring = Clock.fixed(Instant.parse("2026-03-29T00:59:59Z"), berlin)

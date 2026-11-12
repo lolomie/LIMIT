@@ -100,7 +100,7 @@ class LimitUiTest {
         }
     }
 
-    @Test fun chooseAllowedHoursInEditorAndKeepRuleAfterActivityRecreation() {
+    @Test fun chooseFromHoursInEditorAndKeepRuleAfterActivityRecreation() {
         awaitDashboard()
         val app = AppCatalog(compose.activity).load().firstOrNull { !it.protected }
         assumeTrue("An ordinary launchable app must be installed", app != null)
@@ -118,18 +118,14 @@ class LimitUiTest {
                 compose.waitUntil(15_000) { application.repository.state.value.rules[app.packageName] == null }
             }
             compose.onNodeWithContentDescription("Restrict ${app.label}").performClick()
-            compose.onNodeWithTag("hours_from").assertDoesNotExist()
-            compose.onNodeWithTag("hours_from").assertDoesNotExist()
-            compose.onNodeWithTag("hours_between").performClick()
-            compose.onNodeWithTag("hours_from").assertIsDisplayed()
-            compose.onNodeWithTag("hours_until").assertIsDisplayed()
+            compose.onNodeWithTag("hours_from").performScrollTo().performClick()
             compose.onNodeWithTag("save_limit").performClick()
             compose.waitUntil(15_000) {
                 application.repository.state.value.rules[app.packageName]?.hours?.mode ==
-                    AllowedHoursMode.BETWEEN
+                    AllowedHoursMode.FROM
             }
             compose.activityRule.scenario.recreate()
-            assertEquals(AllowedHoursMode.BETWEEN,
+            assertEquals(AllowedHoursMode.FROM,
                 application.repository.state.value.rules[app.packageName]?.hours?.mode)
         } finally {
             runBlocking { application.repository.setRule(app.packageName, original?.limitMinutes, original?.hours) }

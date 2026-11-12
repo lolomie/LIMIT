@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.Button
@@ -602,6 +603,7 @@ private fun PermissionCard(title: String, granted: Boolean, description: String,
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LimitDialog(app: AppEntry, currentRule: AppRule, onDismiss: () -> Unit, onSave: (AppRule) -> Unit) {
     var value by remember(app.packageName) { mutableStateOf(currentRule.limitMinutes.toString()) }

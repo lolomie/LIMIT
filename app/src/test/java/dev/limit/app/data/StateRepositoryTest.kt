@@ -81,6 +81,29 @@ class StateRepositoryTest {
         assertEquals(BudgetPhase.EXCEPTION_ACTIVE, budget.phase)
     }
 
+    @Test fun legacySchemaOneWithoutHoursOpensWithAnytimeAndRetainsLedger() = runBlocking {
+        val writerJob = SupervisorJob()
+        val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(writerJob + Dispatchers.IO)) {
+            storageContext.preferencesDataStoreFile("limit")
+        }
+        val legacy = """{"version":1,"theme":"DARK","rules":{"example.alpha":{"minutes":30,"enabled":true}},"days":{"$today":{"grants":1,"apps":{"example.alpha":{"used":123456,"bonus":50000}}}}}"""
+        store.edit { it[stringPreferencesKey("state_v1")] = legacy }
+        writerJob.cancelAndJoin()
+
+        val repository = open()
+        assertEquals(AllowedHours(), repository.state.value.rules[alpha]?.hours)
+        assertEquals(1, repository.state.value.days[today]?.grantsUsed)
+        assertEquals(123456L, repository.state.value.days[today]?.apps?.get(alpha)?.usedMs)
+        assertEquals(50000L, repository.state.value.days[today]?.apps?.get(alpha)?.bonusRemainingMs)
+        assertEquals("DARK", repository.state.value.theme)
+        repository.setRule(alpha, 30, AllowedHours(AllowedHoursMode.FROM, 18 * 60))
+        assertEquals(1, repository.state.value.days[today]?.grantsUsed)
+        repository.close()
+        val restored = open()
+        assertEquals(AllowedHours(AllowedHoursMode.FROM, 18 * 60), restored.state.value.rules[alpha]?.hours)
+        assertEquals(123456L, restored.state.value.days[today]?.apps?.get(alpha)?.usedMs)
+    }
+
     @Test fun allowedHoursMigrateWithoutChangingLegacyUsageOrGrants() = runBlocking {
         val first = open()
         first.setRule(alpha, 0)

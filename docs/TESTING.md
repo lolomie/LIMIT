@@ -4,6 +4,12 @@ This document describes coverage and acceptance checks. Actual run outcomes are 
 
 The current release results are recorded in the delivered verification report. Version 1.0.5 adds three geometry regressions for tall OEM cutout rectangles and compact left-of-camera placement. Existing Android blocking coverage also checks status-bar containment, compact width, and a minutes-only visible label. Physical-device and HyperOS checks remain separate.
 
+## Version 1.0.8 allowed-hours checks
+
+Pure JVM tests inject fixed `Clock` instances in selected timezones, including exact opening/closing milliseconds, overnight windows, the local-midnight budget reset, unchanged grants and spent credit after a rule edit, and both transitions across European DST changes. Repository tests load schema-v1 JSON without an `hours` field and verify rules, usage, grants and credit after mutation and recreation.
+
+The Android service schedules the earliest enabled time-rule transition via a cancellable coroutine, recomputes after clock/timezone and wake broadcasts, and preserves the existing 15-second reconciliation of restricted active apps. These tests do not simulate Xiaomi process kills; validate boundary enforcement on a disposable device before claiming OEM reliability.
+
 ## Automated checks
 
 ```sh
