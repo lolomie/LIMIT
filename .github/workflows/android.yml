@@ -2,7 +2,7 @@ name: Android validation
 on:
   push:
     branches: ['codex/allowed-app-hours', 'codex/installable-preview']
-    paths: ['app/**', 'test-target/**', 'gradle/**', 'gradlew', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties']
+    paths: ['app/**', 'test-target/**', 'gradle/**', 'gradlew', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', '.github/workflows/android.yml']
   pull_request:
   workflow_dispatch:
 permissions:
