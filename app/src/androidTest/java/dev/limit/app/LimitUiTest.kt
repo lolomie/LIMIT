@@ -14,6 +14,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.limit.app.core.AllowedHours
+import dev.limit.app.core.AllowedHoursMode
 import dev.limit.app.data.AppCatalog
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -94,7 +96,43 @@ class LimitUiTest {
             compose.activityRule.scenario.recreate()
             assertEquals(0, application.repository.state.value.rules[app.packageName]?.limitMinutes)
         } finally {
-            runBlocking { application.repository.setRule(app.packageName, original?.limitMinutes) }
+            runBlocking { application.repository.setRule(app.packageName, original?.limitMinutes, original?.hours) }
+        }
+    }
+
+    @Test fun chooseAllowedHoursInEditorAndKeepRuleAfterActivityRecreation() {
+        awaitDashboard()
+        val app = AppCatalog(compose.activity).load().firstOrNull { !it.protected }
+        assumeTrue("An ordinary launchable app must be installed", app != null)
+        app!!
+        val original = application.repository.state.value.rules[app.packageName]
+        try {
+            compose.onNodeWithTag("nav_apps").performClick()
+            compose.onNodeWithTag("app_search").performTextReplacement(app.packageName)
+            compose.waitUntil(30_000) {
+                compose.onAllNodesWithContentDescription("Restrict ${app.label}")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            if (original?.enabled == true) {
+                compose.onNodeWithContentDescription("Restrict ${app.label}").performClick()
+                compose.waitUntil(15_000) { application.repository.state.value.rules[app.packageName] == null }
+            }
+            compose.onNodeWithContentDescription("Restrict ${app.label}").performClick()
+            compose.onNodeWithTag("hours_from").assertDoesNotExist()
+            compose.onNodeWithTag("hours_from").assertDoesNotExist()
+            compose.onNodeWithTag("hours_between").performClick()
+            compose.onNodeWithTag("hours_from").assertIsDisplayed()
+            compose.onNodeWithTag("hours_until").assertIsDisplayed()
+            compose.onNodeWithTag("save_limit").performClick()
+            compose.waitUntil(15_000) {
+                application.repository.state.value.rules[app.packageName]?.hours?.mode ==
+                    AllowedHoursMode.BETWEEN
+            }
+            compose.activityRule.scenario.recreate()
+            assertEquals(AllowedHoursMode.BETWEEN,
+                application.repository.state.value.rules[app.packageName]?.hours?.mode)
+        } finally {
+            runBlocking { application.repository.setRule(app.packageName, original?.limitMinutes, original?.hours) }
         }
     }
 

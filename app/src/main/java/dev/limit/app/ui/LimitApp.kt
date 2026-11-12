@@ -11,6 +11,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -78,6 +82,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import dev.limit.app.core.AllowedHours
+import dev.limit.app.core.AllowedHoursMode
 import dev.limit.app.core.AppRule
 import dev.limit.app.core.LimitEngine
 import dev.limit.app.core.LimitReachedAction
@@ -181,10 +187,10 @@ fun LimitApp(repository: StateRepository, tracker: UsageTracker) {
         }
     }
 
-    suspend fun saveRule(packageName: String, minutes: Int?) {
+    suspend fun saveRule(packageName: String, minutes: Int?, hours: AllowedHours? = null) {
         val snapshot = tracker.snapshot()
         if (snapshot.available) repository.reconcile(snapshot.date, snapshot.totals)
-        repository.setRule(packageName, minutes)
+        repository.setRule(packageName, minutes, hours)
     }
 
     fun openSettings(action: String, packageSpecific: Boolean = false) {
@@ -281,10 +287,10 @@ fun LimitApp(repository: StateRepository, tracker: UsageTracker) {
         editing?.let { app ->
             LimitDialog(
                 app = app,
-                currentMinutes = state.rules[app.packageName]?.limitMinutes ?: 30,
+                currentRule = state.rules[app.packageName] ?: AppRule(30),
                 onDismiss = { editing = null },
-                onSave = { minutes ->
-                    perform { saveRule(app.packageName, minutes) }
+                onSave = { rule ->
+                    perform { saveRule(app.packageName, rule.limitMinutes, rule.hours) }
                     editing = null
                 },
             )
@@ -385,7 +391,7 @@ private fun Dashboard(
                         AppMonogram(app.label)
                         Column(Modifier.weight(1f)) {
                             Text(app.label, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text("${rule.limitMinutes} min daily limit", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${rule.hours.label} · ${rule.limitMinutes} Min./Tag", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     Text(
@@ -459,7 +465,9 @@ private fun AppsPage(
                     Text(
                         when {
                             app.protected -> "Essential system app · always available"
-                            rule != null -> "${rule.limitMinutes} min per day · tap to edit"
+                            rule != null -> if (rule.hours.mode == AllowedHoursMode.ANYTIME)
+                                "${rule.limitMinutes} min per day · tap to edit"
+                            else "${rule.hours.label} · ${rule.limitMinutes} Min./Tag"
                             else -> "No daily limit"
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -595,15 +603,20 @@ private fun PermissionCard(title: String, granted: Boolean, description: String,
 }
 
 @Composable
-private fun LimitDialog(app: AppEntry, currentMinutes: Int, onDismiss: () -> Unit, onSave: (Int) -> Unit) {
-    var value by remember(app.packageName) { mutableStateOf(currentMinutes.toString()) }
+private fun LimitDialog(app: AppEntry, currentRule: AppRule, onDismiss: () -> Unit, onSave: (AppRule) -> Unit) {
+    var value by remember(app.packageName) { mutableStateOf(currentRule.limitMinutes.toString()) }
+    var mode by remember(app.packageName) { mutableStateOf(currentRule.hours.mode) }
+    var from by remember(app.packageName) { mutableIntStateOf(currentRule.hours.fromMinute) }
+    var until by remember(app.packageName) { mutableIntStateOf(currentRule.hours.untilMinute) }
+    var selecting by remember { mutableStateOf<String?>(null) }
     val minutes = value.toIntOrNull()
-    val valid = minutes != null && minutes in 0..1440
+    val valid = minutes != null && minutes in 0..1440 &&
+        (mode != AllowedHoursMode.BETWEEN || from != until)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Daily limit") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(app.label, fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(
                     value = value,
@@ -611,16 +624,67 @@ private fun LimitDialog(app: AppEntry, currentMinutes: Int, onDismiss: () -> Uni
                     label = { Text("Minutes per day") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    isError = !valid,
-                    supportingText = { Text(if (valid) "0 blocks immediately. Resets at midnight." else "Enter a whole number from 0 to 1,440.") },
+                    isError = minutes == null || minutes !in 0..1440,
+                    supportingText = { Text(if (minutes != null && minutes in 0..1440) "0 blocks immediately. Resets at midnight." else "Enter a whole number from 0 to 1,440.") },
                     modifier = Modifier.fillMaxWidth().testTag("limit_input"),
                 )
-                Text("Changes apply now. Today’s usage and exceptions are kept.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Erlaubte Nutzungszeit", style = MaterialTheme.typography.titleMedium)
+                listOf(
+                    AllowedHoursMode.ANYTIME to "Jederzeit",
+                    AllowedHoursMode.FROM to "Ab Uhrzeit",
+                    AllowedHoursMode.BETWEEN to "Von–bis",
+                ).forEach { (option, title) ->
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().selectable(
+                            selected = mode == option, role = Role.RadioButton,
+                            onClick = { mode = option }).testTag("hours_${option.name.lowercase()}")) {
+                        RadioButton(selected = mode == option, onClick = null)
+                        Text(title)
+                    }
+                }
+                if (mode != AllowedHoursMode.ANYTIME) {
+                    TextButton(onClick = { selecting = "from" }, modifier = Modifier.testTag("hours_from")) {
+                        Text("Beginn: ${AllowedHours.formatMinute(from)}")
+                    }
+                    if (mode == AllowedHoursMode.BETWEEN) {
+                        TextButton(onClick = { selecting = "until" }, modifier = Modifier.testTag("hours_until")) {
+                            Text("Ende: ${AllowedHours.formatMinute(until)}")
+                        }
+                        if (from == until) {
+                            Text("Beginn und Ende müssen verschieden sein.",
+                                color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                Text("Changes apply now. Today’s usage and exceptions are kept.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        confirmButton = { TextButton(onClick = { minutes?.let(onSave) }, enabled = valid, modifier = Modifier.testTag("save_limit")) { Text("Save limit") } },
+        confirmButton = { TextButton(
+            onClick = { if (valid) onSave(AppRule(minutes!!, hours = AllowedHours(mode, from, until))) },
+            enabled = valid, modifier = Modifier.testTag("save_limit"),
+        ) { Text("Save limit") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+    selecting?.let { field ->
+        val selectedMinutes = if (field == "from") from else until
+        val picker = rememberTimePickerState(
+            initialHour = selectedMinutes / 60,
+            initialMinute = selectedMinutes % 60,
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = { selecting = null },
+            title = { Text(if (field == "from") "Beginn auswählen" else "Ende auswählen") },
+            text = { TimePicker(state = picker) },
+            confirmButton = { TextButton(onClick = {
+                val chosen = picker.hour * 60 + picker.minute
+                if (field == "from") from = chosen else until = chosen
+                selecting = null
+            }, modifier = Modifier.testTag("save_hours")) { Text("OK") } },
+            dismissButton = { TextButton(onClick = { selecting = null }) { Text("Abbrechen") } },
+        )
+    }
 }
 
 @Composable
