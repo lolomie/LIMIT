@@ -639,7 +639,7 @@ private fun LimitDialog(app: AppEntry, currentRule: AppRule, onDismiss: () -> Un
                     Row(verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth().selectable(
                             selected = mode == option, role = Role.RadioButton,
-                            onClick = { mode = option }).testTag("hours_${option.name.lowercase()}")) {
+                            onClick = { mode = option }).testTag("hours_mode_${option.name.lowercase()}")) {
                         RadioButton(selected = mode == option, onClick = null)
                         Text(title)
                     }

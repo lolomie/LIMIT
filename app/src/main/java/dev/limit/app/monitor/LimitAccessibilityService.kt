@@ -125,7 +125,7 @@ class LimitAccessibilityService : AccessibilityService() {
                 timeBoundary?.cancel()
                 scope.launch { gate.withLock { clearOverlay() } }
             }
-            if (intent?.action == Intent.ACTION_TIME_CHANGED || intent?.action == Intent.ACTION_TIMEZONE_CHANGED) hideCapsule()
+            if (intent?.action == Intent.ACTION_DATE_CHANGED || intent?.action == Intent.ACTION_TIME_CHANGED || intent?.action == Intent.ACTION_TIMEZONE_CHANGED) hideCapsule()
             if (intent?.action != Intent.ACTION_SCREEN_OFF) resetRecovery() else requestRefresh(0)
         }
     }
@@ -152,6 +152,7 @@ class LimitAccessibilityService : AccessibilityService() {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_DATE_CHANGED)
             addAction(Intent.ACTION_TIME_CHANGED)
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
         }

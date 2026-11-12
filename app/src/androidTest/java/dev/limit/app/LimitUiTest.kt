@@ -1,6 +1,7 @@
 package dev.limit.app
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -118,7 +119,10 @@ class LimitUiTest {
                 compose.waitUntil(15_000) { application.repository.state.value.rules[app.packageName] == null }
             }
             compose.onNodeWithContentDescription("Restrict ${app.label}").performClick()
-            compose.onNodeWithTag("hours_from").performScrollTo().performClick()
+            compose.onNodeWithTag("hours_mode_between").performScrollTo().performClick()
+            compose.onNodeWithTag("save_limit").assertIsNotEnabled()
+            compose.onNodeWithTag("hours_mode_from").performScrollTo().performClick()
+            compose.onNodeWithTag("hours_from").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("save_limit").performClick()
             compose.waitUntil(15_000) {
                 application.repository.state.value.rules[app.packageName]?.hours?.mode ==

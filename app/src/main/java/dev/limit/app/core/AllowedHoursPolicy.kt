@@ -22,8 +22,8 @@ data class AllowedHours(
     }
 
     val label: String get() = when (mode) {
-        AllowedHoursMode.ANYTIME -> "Anytime"
-        AllowedHoursMode.FROM -> "From ${formatMinute(fromMinute)}"
+        AllowedHoursMode.ANYTIME -> "Jederzeit"
+        AllowedHoursMode.FROM -> "Ab ${formatMinute(fromMinute)}"
         AllowedHoursMode.BETWEEN -> "${formatMinute(fromMinute)}–${formatMinute(untilMinute)}"
     }
 
