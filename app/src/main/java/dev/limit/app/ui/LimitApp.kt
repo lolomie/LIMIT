@@ -105,6 +105,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
 import dev.limit.app.monitor.ProtectionService
+import dev.limit.app.nudity.NuditySettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -257,6 +258,7 @@ fun LimitApp(repository: StateRepository, tracker: UsageTracker) {
                     )
                     else -> SettingsPage(
                         state = state,
+                        apps = apps,
                         usageAccess = usageAccess,
                         accessibilityEnabled = accessibilityEnabled,
                         connected = connected,
@@ -490,6 +492,7 @@ private fun AppsPage(
 @Composable
 private fun SettingsPage(
     state: LimitState,
+    apps: List<AppEntry>,
     usageAccess: Boolean,
     accessibilityEnabled: Boolean,
     connected: Boolean,
@@ -535,7 +538,7 @@ private fun SettingsPage(
                 "Accessibility service",
                 accessibilityEnabled && connected,
                 if (accessibilityEnabled && !connected) "Enabled in Settings, but the service is not connected. Re-enable LIMIT or reopen the app."
-                else "Detects app changes and shows the blocking screen. LIMIT does not read screen text, capture screenshots, or control gestures.",
+                else "Detects app changes and shows the blocking screen. Optional offline image analysis needs separate screen-capture consent.",
                 if (accessibilityEnabled && connected) "Review service" else "Enable LIMIT service",
                 onAccessibility,
             )
@@ -543,6 +546,8 @@ private fun SettingsPage(
         item {
             Text("If Android shows “Restricted setting”, open LIMIT’s App info, use the menu to allow restricted settings, then return to Accessibility. Only enable this for an APK you trust.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+        item { NuditySettings(apps = apps, accessibilityConnected = connected) }
         item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
         item { Text("When limit is reached", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
         items(listOf(
@@ -585,7 +590,7 @@ private fun SettingsPage(
                 maxLines = 6, overflow = TextOverflow.Ellipsis)
             TextButton(onClick = onCopyDiagnostics, modifier = Modifier.testTag("copy_service_diagnostics")) { Text("Copy service diagnostics") }
         }
-        item { Text("LIMIT 1.0.7", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)) }
+        item { Text("LIMIT 1.0.8 · experimental nudity preview", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)) }
     }
 }
 
