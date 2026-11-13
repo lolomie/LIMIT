@@ -1,17 +1,25 @@
 #!/bin/sh
 set -eu
-# Pinned upstream Git blob, verified before this file can be used in an APK.
-# GantMan nsfw_model MobileNetV2, MIT; redistributed by getknit/knit.
-source_commit=d3b8210629316247198371cc8deba46af13ce4af
-expected_blob=ac07d99acc93217a77d5b4749760042173b8a3f0
-dest=app/src/main/assets/nsfw.tflite
+# NudeNet YOLOv8n model and AGPL-3.0 license, pinned to one upstream commit.
+# The README says MIT but the checked-in license is AGPL-3.0; apply the stricter license.
+commit=a91f67daba2762e19da01e1278aa06515a322677
+root="https://raw.githubusercontent.com/amarchandan/Nudenet/$commit"
 mkdir -p app/src/main/assets
-tmp="${dest}.tmp"
-trap 'rm -f "$tmp"' EXIT
-curl --fail --location --retry 3 --silent --show-error \
-  "https://raw.githubusercontent.com/getknit/knit/$source_commit/app/src/main/assets/moderation/nsfw.tflite" \
-  -o "$tmp"
-actual="$(git hash-object "$tmp")"
-[ "$actual" = "$expected_blob" ] || { echo "Model blob integrity check failed" >&2; exit 1; }
-mv "$tmp" "$dest"
-echo "Verified MIT model at $dest (git blob $actual)"
+fetch_checked() {
+    url="$1"
+    dest="$2"
+    sha="$3"
+    tmp="${dest}.tmp"
+    trap 'rm -f "$tmp"' EXIT
+    curl --fail --location --retry 3 --silent --show-error "$url" -o "$tmp"
+    actual="$(git hash-object "$tmp")"
+    if [ "$actual" != "$sha" ]; then
+        echo "Integrity mismatch for $dest: $actual" >&2
+        exit 1
+    fi
+    mv "$tmp" "$dest"
+    trap - EXIT
+}
+fetch_checked "$root/nudenet/320n.onnx" "app/src/main/assets/nudenet-320n.onnx" "68eedc3934ac160fce68e2bd4336cfe17eef140b"
+fetch_checked "$root/LICENSE" "app/src/main/assets/nudenet-LICENSE.txt" "0ad25db4bd1d86c452db3f9602ccdbe172438f52"
+echo "Pinned NudeNet YOLOv8n model and AGPL-3.0 license verified."

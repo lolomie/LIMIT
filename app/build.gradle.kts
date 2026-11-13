@@ -30,7 +30,7 @@ android {
     }
 
     buildFeatures { compose = true }
-    androidResources { noCompress += "tflite" }
+    androidResources { noCompress += "onnx" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -49,7 +49,7 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
     implementation("androidx.core:core-ktx:1.17.0")
-    implementation("com.google.ai.edge.litert:litert:1.4.2")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
     implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
@@ -72,8 +72,8 @@ dependencies {
 
 val verifyNudityModel by tasks.registering {
     doLast {
-        val model = file("src/main/assets/nsfw.tflite")
-        check(model.isFile && model.length() == 17_355_548L) {
+        val model = file("src/main/assets/nudenet-320n.onnx")
+        check(model.isFile && model.length() == 12_150_158L) {
             "Offline model missing: sh scripts/fetch-nudity-model.sh"
         }
     }

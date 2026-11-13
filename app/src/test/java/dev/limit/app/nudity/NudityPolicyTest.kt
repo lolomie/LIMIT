@@ -4,31 +4,41 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NudityPolicyTest {
-    @Test fun onlyPornChannelCounts() {
-        assertEquals(0.1f, NudityPolicy.nudityProxy(floatArrayOf(0.0f, 0.8f, 0.0f, 0.1f, 0.1f)), 0.0001f)
-        assertEquals(0.0f, NudityPolicy.nudityProxy(floatArrayOf(0f, 0f, 1f, Float.NaN, 0f)), 0f)
+    @Test fun exposedAnatomyCountsOnlyIfItIsTheBestClassForAnAnchor() {
+        val scores = Array(NudityPolicy.CHANNELS) { FloatArray(2) }
+        scores[4 + 4][0] = 0.88f // exposed genitalia
+        scores[4 + 0][1] = 0.98f // covered genitalia
+        scores[4 + 4][1] = 0.40f
+        assertEquals(0.88f, NudityPolicy.exposedScore(scores), 0.0001f)
     }
-
-    @Test fun needsTwoConsecutiveHits() {
+    @Test fun coveredOrBenignBodyPartsDoNotTrigger() {
+        val scores = Array(NudityPolicy.CHANNELS) { FloatArray(3) }
+        scores[4 + 0][0] = 0.9f // covered genitalia
+        scores[4 + 5][1] = 0.8f // male chest
+        scores[4 + 13][2] = 0.8f // belly
+        assertEquals(0f, NudityPolicy.exposedScore(scores), 0.0001f)
+    }
+    @Test fun rejectsUnexpectedModelOutput() {
+        try {
+            NudityPolicy.exposedScore(Array(5) { FloatArray(2) })
+            fail("Incorrect class layout should fail closed")
+        } catch (_: IllegalArgumentException) {}
+    }
+    @Test fun needsTwoConsecutiveObservations() {
         val smoother = NuditySmoother()
-        assertFalse(smoother.observe(0.94f, 0.85f))
-        assertFalse(smoother.observe(0.4f, 0.85f))
-        assertFalse(smoother.observe(0.91f, 0.85f))
-        assertTrue(smoother.observe(0.87f, 0.85f))
+        assertFalse(smoother.observe(0.7f, 0.48f))
+        assertTrue(smoother.observe(0.62f, 0.48f))
+        assertFalse(smoother.observe(0.4f, 0.48f))
         smoother.reset()
-        assertFalse(smoother.observe(1f, 0.85f))
+        assertFalse(smoother.observe(0.8f, 0.48f))
     }
-
-    @Test fun sensitivityModesAreOrdered() {
+    @Test fun sensitivityOrdering() {
         assertTrue(NuditySensitivity.STRICT.threshold > NuditySensitivity.BALANCED.threshold)
         assertTrue(NuditySensitivity.BALANCED.threshold > NuditySensitivity.SENSITIVE.threshold)
     }
-
-    @Test fun fallbackIsExplicitAndDisabledDuringCapture() {
-        val apps = setOf("example.social")
-        assertFalse(NudityPolicy.fallbackBlocks(false, false, apps, "example.social"))
-        assertFalse(NudityPolicy.fallbackBlocks(true, true, apps, "example.social"))
-        assertFalse(NudityPolicy.fallbackBlocks(true, false, apps, "example.other"))
-        assertTrue(NudityPolicy.fallbackBlocks(true, false, apps, "example.social"))
+    @Test fun fallbackRemainsExplicit() {
+        assertTrue(NudityPolicy.fallbackBlocks(true, false, setOf("example"), "example"))
+        assertFalse(NudityPolicy.fallbackBlocks(false, false, setOf("example"), "example"))
+        assertFalse(NudityPolicy.fallbackBlocks(true, true, setOf("example"), "example"))
     }
 }

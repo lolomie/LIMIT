@@ -93,9 +93,9 @@ fun NuditySettings(apps: List<AppEntry>, accessibilityConnected: Boolean) {
         if (aiEnabled && session.phase == NudityPhase.ACTIVE) {
             Text("Diagnose (nur Arbeitsspeicher)", style = MaterialTheme.typography.titleMedium)
             Text("Analysierte Bilder: ${diagnostics.framesAnalyzed} · Übersprungen: ${diagnostics.skippedFrames}")
-            Text("Letzter Pornografie-Wert: ${diagnostics.lastPornScore?.let { "%.1f".format(it * 100) + "%" } ?: "Noch keiner"}")
+            Text("Letzter Nacktheitswert: ${diagnostics.lastPornScore?.let { "%.1f".format(it * 100) + "%" } ?: "Noch keiner"}")
             Text("Höchster Wert: ${"%.1f".format(diagnostics.maximumPornScore * 100)}% · Sperrsignale: ${diagnostics.blockRequests}")
-            Text("Das bisherige Modell misst Pornografie, nicht anatomische Nacktheit. Werte sind keine verlässlichen Wahrscheinlichkeiten.", style = MaterialTheme.typography.bodySmall)
+            Text("Die KI sucht gezielt nach entblößten Körperbereichen, erkennt aber nicht jeden Fall. Werte sind keine kalibrierten Wahrscheinlichkeiten.", style = MaterialTheme.typography.bodySmall)
         }
         if (aiEnabled && session.phase != NudityPhase.ACTIVE && session.phase != NudityPhase.STARTING) {
             Button(

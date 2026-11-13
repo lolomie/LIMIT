@@ -24,8 +24,8 @@ object NuditySession {
 /** In-memory counters only. No image, pixel, URL, or app-name retention. */
 data class NudityDiagnosticsSnapshot(
     val framesAnalyzed: Long = 0,
-    val lastPornScore: Float? = null,
-    val maximumPornScore: Float = 0f,
+    val lastNudityScore: Float? = null,
+    val maximumNudityScore: Float = 0f,
     val blockRequests: Long = 0,
     val skippedFrames: Long = 0,
 )
