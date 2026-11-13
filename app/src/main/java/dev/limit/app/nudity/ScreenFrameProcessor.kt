@@ -5,6 +5,7 @@ import android.graphics.PixelFormat
 import android.media.Image
 import android.media.ImageReader
 import android.os.SystemClock
+import android.os.PowerManager
 import android.content.Context
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -17,17 +18,21 @@ class ScreenFrameProcessor(context: Context) : AutoCloseable {
     private val smoother = NuditySmoother()
     private val busy = AtomicBoolean(false)
     private val preferences = NudityPreferences(context)
+    private val power = context.getSystemService(PowerManager::class.java)
     private var lastRunMs = 0L
     private var quickScanUntil = 0L
     private var lastPackage: String? = null
 
     fun onFrame(reader: ImageReader) {
         val image = try { reader.acquireLatestImage() } catch (_: IllegalStateException) { null } ?: return
+        var owned = false
         try {
             val now = SystemClock.elapsedRealtime()
             val interval = if (now < quickScanUntil) 500 else 1000
             if (now - lastRunMs < interval || !busy.compareAndSet(false, true)) return
+            owned = true
             lastRunMs = now
+            if (!power.isInteractive) return
             val foreground = NudityBlockCoordinator.foregroundPackage ?: return
             if (NudityBlockCoordinator.requested.value == foreground ||
                 NuditySession.status.value.phase != NudityPhase.ACTIVE) return
@@ -46,7 +51,7 @@ class ScreenFrameProcessor(context: Context) : AutoCloseable {
             } finally { bitmap.recycle() }
         } finally {
             image.close()
-            busy.set(false)
+            if (owned) busy.set(false)
         }
     }
 

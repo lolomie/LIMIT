@@ -145,17 +145,29 @@ class NudityDetectionService : Service() {
             reader?.setOnImageAvailableListener(null, null)
             display?.release()
             display = null
-            reader?.close()
+            val oldReader = reader
             reader = null
-            processor?.close()
+            val oldProcessor = processor
             processor = null
             projection?.let { p ->
                 runCatching { p.unregisterCallback(callback) }
                 runCatching { p.stop() }
             }
             projection = null
-            thread?.quitSafely()
+            // Close native inference on its owning HandlerThread, after an in-flight
+            // onImageAvailable callback. Never race Interpreter.close with inference.
+            val worker = thread
             thread = null
+            if (worker != null) {
+                Handler(worker.looper).post {
+                    runCatching { oldReader?.close() }
+                    runCatching { oldProcessor?.close() }
+                    worker.quitSafely()
+                }
+            } else {
+                runCatching { oldReader?.close() }
+                runCatching { oldProcessor?.close() }
+            }
             if (NuditySession.status.value.phase == NudityPhase.ACTIVE ||
                 NuditySession.status.value.phase == NudityPhase.STARTING)
                 NuditySession.set(NudityPhase.CONSENT_REQUIRED, "Aufnahme beendet. Erneut freigeben.")
