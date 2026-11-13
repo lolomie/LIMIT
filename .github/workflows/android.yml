@@ -180,24 +180,40 @@ jobs:
             echo 'Source changed after validation; refusing to publish.'
             exit 1
           }
-      - name: Verify signature, alignment and publish experimental preview
+      - name: Verify signed APK, 16KiB alignment and checksum
         run: |
-          cp validation/app/build/outputs/apk/preview/app-preview.apk dist/LIMIT-nudity-preview.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/LIMIT-nudity-preview.apk > dist/LIMIT-nudity-preview-SIGNATURE.txt
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LIMIT-nudity-preview.apk
-          sha256sum dist/LIMIT-nudity-preview.apk > dist/LIMIT-nudity-preview-SHA256SUMS
-          printf '%s\n' '# LIMIT experimental nudity preview verification' '' \
-            'Package: dev.limit.app.preview. Separate install, existing LIMIT data untouched.' \
-            'Build passed JVM tests, lint, API29 instrumentation and API36 co-install/launch smoke.' \
-            'MediaProjection consent/rotation, sensitive image classification, and real Redmi/HyperOS behavior are NOT certified.' \
-            'NSFW model predicts porn, NOT anatomical nudity. No measured precision, recall or false-alarm rate.' \
-            'No INTERNET permission; in-app inference runs locally. Model license: GantMan MIT.' \
-            'The test APK uses an ephemeral CI debug certificate: later updates may not install over it.' \
+          apk=validation/app/build/outputs/apk/preview/app-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" > dist/LIMIT-nudity-v2-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$apk"
+          sha256sum "$apk" > dist/LIMIT-nudity-v2-SHA256SUMS
+          printf '%s\n' '# LIMIT anatomical nude detector – experimental preview' '' \
+            'Model: NudeNet 320n ONNX, upstream LICENSE is AGPL-3.0; see docs/NUDITY_PROTECTION.md.' \
+            'CI: JVM tests, lint, API29 instrumentation, API36 preview co-install and launch passed.' \
+            'Model confidence not calibrated; no image-based recall/precision tests or physical Redmi test.' \
+            'No Internet permission. MediaProjection only with explicit screen consent.' \
+            'APK package dev.limit.app.preview; cannot replace the existing LIMIT installation.' \
+            'CI runner debug certificate will differ from earlier previews; do not uninstall existing LIMIT.' \
             "Source commit: $GITHUB_SHA" \
             "Workflow: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            > dist/LIMIT-nudity-preview-TEST-RESULTS.md
+            > dist/LIMIT-nudity-v2-TEST-RESULTS.md
+      - name: Publish APK to GitHub Release (not repository Git blobs)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=limit-nudity-anatomical-preview-20261113
+          apk=validation/app/build/outputs/apk/preview/app-preview.apk
+          cp "$apk" /tmp/LIMIT-nudity-anatomical-preview.apk
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" /tmp/LIMIT-nudity-anatomical-preview.apk --clobber
+          else
+            gh release create "$tag" /tmp/LIMIT-nudity-anatomical-preview.apk \
+              --target "$GITHUB_SHA" --title "LIMIT anatomical nudity protection (experimental)" \
+              --prerelease --notes "Offline NudeNet ONNX anatomical preview (AGPL-3.0 upstream). CI-built and Android 36 co-install tested. Not validated on real Redmi; precision, recall and power use unknown. Separate package dev.limit.app.preview."
+          fi
+      - name: Preserve verification notes (without >100MB APK in Git)
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add dist/LIMIT-nudity-preview*
-          git commit -m 'Archive CI-verified experimental nudity preview APK'
+          git add dist/LIMIT-nudity-v2-TEST-RESULTS.md dist/LIMIT-nudity-v2-SIGNATURE.txt dist/LIMIT-nudity-v2-SHA256SUMS
+          git commit -m 'Record signed NudeNet preview verification'
           git push origin HEAD:codex/offline-nudity-protection
