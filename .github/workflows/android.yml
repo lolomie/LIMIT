@@ -1,0 +1,219 @@
+name: Android validation
+on:
+  push:
+    branches: ['codex/allowed-app-hours', 'codex/installable-preview', 'codex/offline-nudity-protection']
+    paths: ['app/**', 'test-target/**', 'gradle/**', 'gradlew', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', '.github/workflows/android.yml']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - run: sh scripts/fetch-nudity-model.sh
+      - run: ./gradlew testDebugUnitTest lintDebug lintPreview assembleDebug assemblePreview assembleDebugAndroidTest :test-target:assembleDebug --console=plain
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install -r test-target/build/outputs/apk/debug/test-target-debug.apk
+            ./gradlew connectedDebugAndroidTest --console=plain
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LIMIT-nudity-validation
+          path: |
+            app/build/outputs/apk/
+            test-target/build/outputs/apk/
+            app/build/reports/
+            app/build/test-results/
+            app/build/outputs/androidTest-results/
+
+  publish-verified-snapshot:
+    needs: build
+    if: github.event_name == 'push' && github.ref_name == 'codex/allowed-app-hours'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/allowed-app-hours
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-nudity-validation
+          path: validation
+      - name: Refuse a stale validation artifact
+        run: |
+          # Only publish if the tested source matches the current branch code.
+          # A later docs/dist-only commit is fine; a later app/build edit is not.
+          git diff --quiet "$GITHUB_SHA" HEAD -- app/ test-target/ gradle/ gradlew build.gradle.kts settings.gradle.kts gradle.properties || {
+            echo 'Source files changed after this run. Refusing to publish an older APK.'
+            exit 1
+          }
+      - name: Preserve verified APK and reports
+        run: |
+          cp validation/app/build/outputs/apk/debug/app-debug.apk dist/LIMIT-1.0.8.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/LIMIT-1.0.8.apk > dist/LIMIT-1.0.8-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LIMIT-1.0.8.apk
+          zip -qr dist/LIMIT-1.0.8-test-results.zip validation/app/build/reports validation/app/build/test-results validation/app/build/outputs/androidTest-results
+          sha256sum dist/LIMIT-1.0.8.apk dist/LIMIT-1.0.8-test-results.zip > dist/LIMIT-1.0.8-SHA256SUMS
+          printf '%s\n' '# LIMIT 1.0.8 verification' '' 'This snapshot passed the Android validation workflow: JVM tests, lint, debug APK build and API29 emulator instrumentation including task removal.' 'Physical Redmi/HyperOS reliability, overnight battery behavior, API34+ runtime behavior and installation as an update to 1.0.6 are not certified.' 'Debug signing keys are generated per runner. Do not uninstall your personal installation to install this APK. A matching original signing key is required for an in-place update.' "Source commit: $GITHUB_SHA" "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > dist/LIMIT-1.0.8-TEST-RESULTS.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/LIMIT-1.0.8*
+          git commit -m 'Archive verified LIMIT 1.0.8 APK and fresh validation reports'
+          git push origin HEAD:codex/allowed-app-hours
+
+  preview-smoke-36:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-nudity-validation
+          path: validation
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            # Both packages must coexist: the preview does not replace installed LIMIT.
+            adb install -r validation/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r validation/app/build/outputs/apk/preview/app-preview.apk
+            adb shell pm path dev.limit.app | grep 'package:'
+            adb shell pm path dev.limit.app.preview | grep 'package:'
+            adb shell am start -W -n dev.limit.app.preview/dev.limit.app.MainActivity
+            adb shell pidof dev.limit.app.preview
+
+  publish-verified-preview:
+    needs: [build, preview-smoke-36]
+    if: github.event_name == 'push' && github.ref_name == 'codex/installable-preview'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/installable-preview
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-nudity-validation
+          path: validation
+      - name: Refuse a stale preview source
+        run: |
+          git diff --quiet "$GITHUB_SHA" HEAD -- app/ test-target/ gradle/ gradlew build.gradle.kts settings.gradle.kts gradle.properties .github/workflows/android.yml || {
+            echo 'Build files changed after testing. Refusing to publish a stale APK.'
+            exit 1
+          }
+      - name: Publish independently installable preview
+        run: |
+          cp validation/app/build/outputs/apk/preview/app-preview.apk dist/LIMIT-1.0.8-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/LIMIT-1.0.8-preview.apk > dist/LIMIT-1.0.8-preview-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LIMIT-1.0.8-preview.apk
+          sha256sum dist/LIMIT-1.0.8-preview.apk > dist/LIMIT-1.0.8-preview-SHA256SUMS
+          printf '%s\n' '# LIMIT 1.0.8 preview verification' '' \
+            'Application ID: dev.limit.app.preview (separate from dev.limit.app).' \
+            'This signed DEBUG test APK can install beside existing LIMIT without a signing-certificate conflict.' \
+            'This does NOT update or migrate the existing installation.' \
+            'JVM tests, Android lint, API29 UI tests, and the API36 coexistence/install/launch smoke test succeeded.' \
+            'Google Play Protect and Xiaomi/HyperOS can still block sideloaded Accessibility apps. No bypass is implemented or advised.' \
+            'The signing key is CI-generated and NOT stable for later updates. Physical Redmi install remains unverified.' \
+            "Tested source commit: $GITHUB_SHA" \
+            "CI run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > dist/LIMIT-1.0.8-preview-TEST-RESULTS.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/LIMIT-1.0.8-preview*
+          git commit -m 'Archive validated independent LIMIT preview APK'
+          git push origin HEAD:codex/installable-preview
+
+  publish-nudity-preview:
+    needs: [build, preview-smoke-36]
+    if: github.event_name == 'push' && github.ref_name == 'codex/offline-nudity-protection'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/offline-nudity-protection
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-nudity-validation
+          path: validation
+      - name: Reject stale or untested source
+        run: |
+          git diff --quiet "$GITHUB_SHA" HEAD -- app/ test-target/ gradle/ gradlew build.gradle.kts settings.gradle.kts gradle.properties scripts/fetch-nudity-model.sh .github/workflows/android.yml || {
+            echo 'Source changed after validation; refusing to publish.'
+            exit 1
+          }
+      - name: Verify signed APK, 16KiB alignment and checksum
+        run: |
+          apk=validation/app/build/outputs/apk/preview/app-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" > dist/LIMIT-nudity-v2-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$apk"
+          sha256sum "$apk" > dist/LIMIT-nudity-v2-SHA256SUMS
+          printf '%s\n' '# LIMIT anatomical nude detector – experimental preview' '' \
+            'Model: NudeNet 320n ONNX, upstream LICENSE is AGPL-3.0; see docs/NUDITY_PROTECTION.md.' \
+            'CI: JVM tests, lint, API29 instrumentation, API36 preview co-install and launch passed.' \
+            'Model confidence not calibrated; no image-based recall/precision tests or physical Redmi test.' \
+            'No Internet permission. MediaProjection only with explicit screen consent.' \
+            'APK package dev.limit.app.preview; cannot replace the existing LIMIT installation.' \
+            'CI runner debug certificate will differ from earlier previews; do not uninstall existing LIMIT.' \
+            "Source commit: $GITHUB_SHA" \
+            "Workflow: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > dist/LIMIT-nudity-v2-TEST-RESULTS.md
+      - name: Publish APK to GitHub Release (not repository Git blobs)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=limit-nudity-anatomical-preview-20261113
+          apk=validation/app/build/outputs/apk/preview/app-preview.apk
+          cp "$apk" /tmp/LIMIT-nudity-anatomical-preview.apk
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" /tmp/LIMIT-nudity-anatomical-preview.apk --clobber
+          else
+            gh release create "$tag" /tmp/LIMIT-nudity-anatomical-preview.apk \
+              --target "$GITHUB_SHA" --title "LIMIT anatomical nudity protection (experimental)" \
+              --prerelease --notes "Offline NudeNet ONNX anatomical preview (AGPL-3.0 upstream). CI-built and Android 36 co-install tested. Not validated on real Redmi; precision, recall and power use unknown. Separate package dev.limit.app.preview."
+          fi
+      - name: Preserve verification notes (without >100MB APK in Git)
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/LIMIT-nudity-v2-TEST-RESULTS.md dist/LIMIT-nudity-v2-SIGNATURE.txt dist/LIMIT-nudity-v2-SHA256SUMS
+          git commit -m 'Record signed NudeNet preview verification'
+          git push origin HEAD:codex/offline-nudity-protection
