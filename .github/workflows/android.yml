@@ -58,7 +58,7 @@ jobs:
           ref: codex/allowed-app-hours
       - uses: actions/download-artifact@v4
         with:
-          name: LIMIT-1.0.8-validation
+          name: LIMIT-nudity-validation
           path: validation
       - name: Refuse a stale validation artifact
         run: |
@@ -97,7 +97,7 @@ jobs:
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - uses: actions/download-artifact@v4
         with:
-          name: LIMIT-1.0.8-validation
+          name: LIMIT-nudity-validation
           path: validation
       - name: Enable emulator acceleration
         run: sudo chmod a+rw /dev/kvm
@@ -130,7 +130,7 @@ jobs:
           ref: codex/installable-preview
       - uses: actions/download-artifact@v4
         with:
-          name: LIMIT-1.0.8-validation
+          name: LIMIT-nudity-validation
           path: validation
       - name: Refuse a stale preview source
         run: |
@@ -159,3 +159,45 @@ jobs:
           git add dist/LIMIT-1.0.8-preview*
           git commit -m 'Archive validated independent LIMIT preview APK'
           git push origin HEAD:codex/installable-preview
+
+  publish-nudity-preview:
+    needs: [build, preview-smoke-36]
+    if: github.event_name == 'push' && github.ref_name == 'codex/offline-nudity-protection'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/offline-nudity-protection
+      - uses: actions/download-artifact@v4
+        with:
+          name: LIMIT-nudity-validation
+          path: validation
+      - name: Reject stale or untested source
+        run: |
+          git diff --quiet "$GITHUB_SHA" HEAD -- app/ test-target/ gradle/ gradlew build.gradle.kts settings.gradle.kts gradle.properties scripts/fetch-nudity-model.sh .github/workflows/android.yml || {
+            echo 'Source changed after validation; refusing to publish.'
+            exit 1
+          }
+      - name: Verify signature, alignment and publish experimental preview
+        run: |
+          cp validation/app/build/outputs/apk/preview/app-preview.apk dist/LIMIT-nudity-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/LIMIT-nudity-preview.apk > dist/LIMIT-nudity-preview-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LIMIT-nudity-preview.apk
+          sha256sum dist/LIMIT-nudity-preview.apk > dist/LIMIT-nudity-preview-SHA256SUMS
+          printf '%s\n' '# LIMIT experimental nudity preview verification' '' \
+            'Package: dev.limit.app.preview. Separate install, existing LIMIT data untouched.' \
+            'Build passed JVM tests, lint, API29 instrumentation and API36 co-install/launch smoke.' \
+            'MediaProjection consent/rotation, sensitive image classification, and real Redmi/HyperOS behavior are NOT certified.' \
+            'NSFW model predicts porn, NOT anatomical nudity. No measured precision, recall or false-alarm rate.' \
+            'No INTERNET permission; in-app inference runs locally. Model license: GantMan MIT.' \
+            'The test APK uses an ephemeral CI debug certificate: later updates may not install over it.' \
+            "Source commit: $GITHUB_SHA" \
+            "Workflow: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > dist/LIMIT-nudity-preview-TEST-RESULTS.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/LIMIT-nudity-preview*
+          git commit -m 'Archive CI-verified experimental nudity preview APK'
+          git push origin HEAD:codex/offline-nudity-protection
