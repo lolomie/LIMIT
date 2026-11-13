@@ -37,8 +37,8 @@ object NudityDiagnostics {
         val old = mutable.value
         mutable.value = old.copy(
             framesAnalyzed = old.framesAnalyzed + 1,
-            lastPornScore = score.takeIf { it.isFinite() },
-            maximumPornScore = if (score.isFinite()) maxOf(old.maximumPornScore, score) else old.maximumPornScore,
+            lastNudityScore = score.takeIf { it.isFinite() },
+            maximumNudityScore = if (score.isFinite()) maxOf(old.maximumNudityScore, score) else old.maximumPornScore,
             blockRequests = old.blockRequests + if (blocked) 1 else 0
         )
     }
