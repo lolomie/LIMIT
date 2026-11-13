@@ -47,6 +47,7 @@ fun NuditySettings(apps: List<AppEntry>, accessibilityConnected: Boolean) {
     var sensitivity by remember { mutableStateOf(prefs.sensitivity) }
     var showApps by remember { mutableStateOf(false) }
     val session by NuditySession.status.collectAsState()
+    val diagnostics by NudityDiagnostics.status.collectAsState()
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK || result.data == null) {
             NuditySession.set(NudityPhase.CONSENT_REQUIRED, "Bildschirmfreigabe nicht erteilt.")
@@ -89,6 +90,13 @@ fun NuditySettings(apps: List<AppEntry>, accessibilityConnected: Boolean) {
         }
         Text("Status: $label", style = MaterialTheme.typography.bodyMedium)
         session.explanation?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (aiEnabled && session.phase == NudityPhase.ACTIVE) {
+            Text("Diagnose (nur Arbeitsspeicher)", style = MaterialTheme.typography.titleMedium)
+            Text("Analysierte Bilder: ${diagnostics.framesAnalyzed} · Übersprungen: ${diagnostics.skippedFrames}")
+            Text("Letzter Pornografie-Wert: ${diagnostics.lastPornScore?.let { "%.1f".format(it * 100) + "%" } ?: "Noch keiner"}")
+            Text("Höchster Wert: ${"%.1f".format(diagnostics.maximumPornScore * 100)}% · Sperrsignale: ${diagnostics.blockRequests}")
+            Text("Das bisherige Modell misst Pornografie, nicht anatomische Nacktheit. Werte sind keine verlässlichen Wahrscheinlichkeiten.", style = MaterialTheme.typography.bodySmall)
+        }
         if (aiEnabled && session.phase != NudityPhase.ACTIVE && session.phase != NudityPhase.STARTING) {
             Button(
                 onClick = {

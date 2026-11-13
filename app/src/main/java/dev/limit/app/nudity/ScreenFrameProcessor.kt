@@ -29,7 +29,10 @@ class ScreenFrameProcessor(context: Context) : AutoCloseable {
         try {
             val now = SystemClock.elapsedRealtime()
             val interval = if (now < quickScanUntil) 500 else 1000
-            if (now - lastRunMs < interval || !busy.compareAndSet(false, true)) return
+            if (now - lastRunMs < interval || !busy.compareAndSet(false, true)) {
+                NudityDiagnostics.skipped()
+                return
+            }
             owned = true
             lastRunMs = now
             if (!power.isInteractive) return
@@ -44,10 +47,10 @@ class ScreenFrameProcessor(context: Context) : AutoCloseable {
             try {
                 val score = classifier.score(bitmap)
                 if (score >= 0.55f) quickScanUntil = now + 3000
-                if (smoother.observe(score, preferences.sensitivity.threshold) &&
-                    foreground == NudityBlockCoordinator.foregroundPackage) {
-                    NudityBlockCoordinator.flag(foreground)
-                }
+                val shouldBlock = smoother.observe(score, preferences.sensitivity.threshold) &&
+                    foreground == NudityBlockCoordinator.foregroundPackage
+                NudityDiagnostics.analyzed(score, shouldBlock)
+                if (shouldBlock) NudityBlockCoordinator.flag(foreground)
             } finally { bitmap.recycle() }
         } finally {
             image.close()

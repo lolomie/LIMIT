@@ -14,8 +14,39 @@ object NuditySession {
     val status: StateFlow<NuditySessionSnapshot> = mutable.asStateFlow()
     fun set(phase: NudityPhase, explanation: String? = null) {
         mutable.value = NuditySessionSnapshot(phase, explanation?.take(140))
-        if (phase != NudityPhase.ACTIVE) NudityBlockCoordinator.clearRequest()
+        if (phase != NudityPhase.ACTIVE) {
+            NudityBlockCoordinator.clearRequest()
+            NudityDiagnostics.reset()
+        }
     }
+}
+
+/** In-memory counters only. No image, pixel, URL, or app-name retention. */
+data class NudityDiagnosticsSnapshot(
+    val framesAnalyzed: Long = 0,
+    val lastPornScore: Float? = null,
+    val maximumPornScore: Float = 0f,
+    val blockRequests: Long = 0,
+    val skippedFrames: Long = 0,
+)
+
+object NudityDiagnostics {
+    private val mutable = MutableStateFlow(NudityDiagnosticsSnapshot())
+    val status: StateFlow<NudityDiagnosticsSnapshot> = mutable.asStateFlow()
+    fun analyzed(score: Float, blocked: Boolean) {
+        val old = mutable.value
+        mutable.value = old.copy(
+            framesAnalyzed = old.framesAnalyzed + 1,
+            lastPornScore = score.takeIf { it.isFinite() },
+            maximumPornScore = if (score.isFinite()) maxOf(old.maximumPornScore, score) else old.maximumPornScore,
+            blockRequests = old.blockRequests + if (blocked) 1 else 0
+        )
+    }
+    fun skipped() {
+        val old = mutable.value
+        mutable.value = old.copy(skippedFrames = old.skippedFrames + 1)
+    }
+    fun reset() { mutable.value = NudityDiagnosticsSnapshot() }
 }
 
 /** Bridges optional content protection into LIMIT's existing accessibility blocker.
