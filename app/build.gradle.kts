@@ -30,6 +30,7 @@ android {
     }
 
     buildFeatures { compose = true }
+    androidResources { noCompress += "tflite" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -48,6 +49,7 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("com.google.ai.edge.litert:litert:1.4.2")
     implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
@@ -67,6 +69,16 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }
+
+val verifyNudityModel by tasks.registering {
+    doLast {
+        val model = file("src/main/assets/nsfw.tflite")
+        check(model.isFile && model.length() == 17_355_548L) {
+            "Offline model missing: sh scripts/fetch-nudity-model.sh"
+        }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(verifyNudityModel) }
 
 tasks.withType<Test>().configureEach {
     val testHome = layout.buildDirectory.dir("test-home").get().asFile.apply { mkdirs() }

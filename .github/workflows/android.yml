@@ -1,7 +1,7 @@
 name: Android validation
 on:
   push:
-    branches: ['codex/allowed-app-hours', 'codex/installable-preview']
+    branches: ['codex/allowed-app-hours', 'codex/installable-preview', 'codex/offline-nudity-protection']
     paths: ['app/**', 'test-target/**', 'gradle/**', 'gradlew', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', '.github/workflows/android.yml']
   pull_request:
   workflow_dispatch:
@@ -20,6 +20,7 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - run: sh scripts/fetch-nudity-model.sh
       - run: ./gradlew testDebugUnitTest lintDebug lintPreview assembleDebug assemblePreview assembleDebugAndroidTest :test-target:assembleDebug --console=plain
       - name: Enable emulator acceleration
         run: sudo chmod a+rw /dev/kvm
@@ -37,7 +38,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LIMIT-1.0.8-validation
+          name: LIMIT-nudity-validation
           path: |
             app/build/outputs/apk/
             test-target/build/outputs/apk/

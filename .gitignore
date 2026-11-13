@@ -16,3 +16,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# MIT-licensed model fetched from pinned Git blob during build
+app/src/main/assets/nsfw.tflite
