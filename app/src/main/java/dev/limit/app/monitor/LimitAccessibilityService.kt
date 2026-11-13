@@ -630,6 +630,7 @@ class LimitAccessibilityService : AccessibilityService() {
         overlay?.let { view -> runCatching { getSystemService(WindowManager::class.java).removeView(view) } }
         overlay = null
         blockedPackage = null
+        nudityBlocked = false
         exceptionButton = null
         exceptionLabel = null
         errorLabel = null
