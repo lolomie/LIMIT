@@ -26,6 +26,12 @@ import android.widget.FrameLayout
 import dev.limit.app.LimitApplication
 import dev.limit.app.core.AllowedHoursPolicy
 import dev.limit.app.core.BlockReason
+import dev.limit.app.nudity.NudityBlockCoordinator
+import dev.limit.app.nudity.NudityPolicy
+import dev.limit.app.nudity.NudityPreferences
+import dev.limit.app.nudity.NudityPhase
+import dev.limit.app.nudity.NuditySession
+import dev.limit.app.nudity.NudityProtectionOverlay
 import dev.limit.app.core.LimitEngine
 import dev.limit.app.core.LimitReachedAction
 import dev.limit.app.core.BlockSessionPolicy
@@ -90,6 +96,8 @@ class LimitAccessibilityService : AccessibilityService() {
     private var refreshStartedAt: Long? = null
     private var overlay: View? = null
     private var blockedPackage: String? = null
+    private var nudityBlocked = false
+    private val nudityPreferences by lazy { NudityPreferences(this) }
     private var lastWindowPackage: String? = null
     private var exceptionButton: Button? = null
     private var exceptionLabel: TextView? = null
@@ -163,6 +171,8 @@ class LimitAccessibilityService : AccessibilityService() {
         }
         if (!observing) {
             observing = true
+            scope.launch { NudityBlockCoordinator.requested.collect { requestRefresh(0) } }
+            scope.launch { NuditySession.status.collect { requestRefresh(0) } }
             scope.launch {
                 repository.state.map { Triple(it.rules, it.theme, it.limitReachedAction) }
                     .distinctUntilChanged().collect { requestRefresh(0) }
@@ -222,6 +232,7 @@ class LimitAccessibilityService : AccessibilityService() {
         if (pkg == packageName) {
             if (event.className?.toString()?.endsWith("MainActivity") == true) {
                 lastWindowPackage = pkg
+                NudityBlockCoordinator.onForegroundChanged(null)
                 capsuleFocusedPackage = null
                 hideCapsule()
                 val expected = sessionGeneration
@@ -232,6 +243,7 @@ class LimitAccessibilityService : AccessibilityService() {
             return
         }
         if (pkg !in keyboardPackages) {
+            NudityBlockCoordinator.onForegroundChanged(pkg.takeUnless { it in protectedPackages })
             val next = pkg.takeUnless { it in protectedPackages }
             if (next != capsuleFocusedPackage || next == null) hideCapsule()
             capsuleFocusedPackage = next
@@ -337,7 +349,21 @@ class LimitAccessibilityService : AccessibilityService() {
             repository.reconcile(snapshot.date, snapshot.totals)
             val state = repository.state.value
             val blocked = blockedPackage
-            if (blocked != null) {
+            if (blocked != null && nudityBlocked) {
+                val reason = AllowedHoursPolicy.reason(state.rules[blocked],
+                    LimitEngine.budget(state, snapshot.date, blocked))
+                if (reason != BlockReason.NONE) {
+                    clearOverlay()
+                    showOverlay(blocked, snapshot.date, reason)
+                } else if (lastWindowPackage != blocked ||
+                    (NudityBlockCoordinator.requested.value != blocked &&
+                        !NudityPolicy.fallbackBlocks(nudityPreferences.fallbackEnabled,
+                            NuditySession.status.value.phase == NudityPhase.ACTIVE,
+                            nudityPreferences.fallbackPackages, blocked))) {
+                    clearOverlay()
+                }
+            }
+            if (blocked != null && !nudityBlocked && blockedPackage != null) {
                 val budget = LimitEngine.budget(state, snapshot.date, blocked)
                 val other = lastWindowPackage
                 val confirmedNavigation = BlockSessionPolicy.shouldDismiss(sessionGeneration, sessionGeneration,
@@ -366,7 +392,19 @@ class LimitAccessibilityService : AccessibilityService() {
                     if (reason == BlockReason.DAILY_BUDGET &&
                         state.limitReachedAction == LimitReachedAction.RETURN_HOME) returnHome(pkg)
                     else showOverlay(pkg, snapshot.date, reason)
-                } else if (candidates.isNotEmpty()) {
+                } else {
+                    val foreground = lastWindowPackage?.takeUnless {
+                        it in protectedPackages || it in homes || it in keyboardPackages
+                    }
+                    val captureActive = NuditySession.status.value.phase == NudityPhase.ACTIVE
+                    if (foreground != null &&
+                        (NudityBlockCoordinator.requested.value == foreground ||
+                         NudityPolicy.fallbackBlocks(nudityPreferences.fallbackEnabled,
+                             captureActive, nudityPreferences.fallbackPackages, foreground))) {
+                        showNudityOverlay(foreground)
+                    }
+                }
+                if (blockedPackage == null && candidates.isNotEmpty()) {
                     val remaining = candidates.minOf {
                         LimitEngine.budget(state, snapshot.date, it).remainingMs
                     }
@@ -426,7 +464,29 @@ class LimitAccessibilityService : AccessibilityService() {
         }
     }
 
+    private suspend fun showNudityOverlay(pkg: String) {
+        if (overlay != null || !usableScreen()) return
+        hideCapsule()
+        repository.beginBlock(pkg)
+        blockedPackage = pkg
+        nudityBlocked = true
+        sessionGeneration++
+        try {
+            val view = NudityProtectionOverlay.create(this) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                scope.launch { gate.withLock { clearOverlay() } }
+            }
+            getSystemService(WindowManager::class.java).addView(view,
+                NudityProtectionOverlay.layoutParams())
+            overlay = view
+        } catch (error: Exception) {
+            ServiceDiagnostics.record(this, "nudity_overlay", error)
+            clearOverlay()
+        }
+    }
+
     private suspend fun showOverlay(pkg: String, date: String, reason: BlockReason) {
+        nudityBlocked = false
         protectedPackages = protectedPackages + AppCatalog(this).protectedPackages()
         if (!usableScreen() || pkg in protectedPackages) return
         hideCapsule()
@@ -655,6 +715,7 @@ class LimitAccessibilityService : AccessibilityService() {
         overlay?.let { view -> runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(view) } }
         overlay = null
         blockedPackage = null
+        nudityBlocked = false
         sessionGeneration++
         repository.finishBlockAsync()
         return super.onUnbind(intent)
